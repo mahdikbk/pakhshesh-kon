@@ -23,7 +23,7 @@ apt update && apt upgrade -y
 if [[ "$server_location" == "iran" ]]; then
     # Install dependencies for Iran server
     echo -e "${YELLOW}Installing Apache, PHP, MariaDB, and other dependencies...${NC}"
-    apt install -y apache2 php php-mysql mariadb-server unzip curl
+    apt install -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php
 
     # Start and enable services
     systemctl enable apache2
@@ -32,7 +32,15 @@ if [[ "$server_location" == "iran" ]]; then
     systemctl start mariadb
 
     # Secure MariaDB
-    mysql_secure_installation
+    echo -e "${YELLOW}Securing MariaDB...${NC}"
+    mysql_secure_installation <<EOF
+
+y
+y
+y
+y
+y
+EOF
 
     # Create database
     echo -e "${YELLOW}Setting up database...${NC}"
@@ -68,13 +76,67 @@ define('DB_PASS', '$DB_PASS');
 ?>
 EOL
 
-    # Set admin credentials
-    ADMIN_HASH=$(php -r "echo password_hash('$admin_pass', PASSWORD_BCRYPT);")
-    mysql -u$DB_USER -p$DB_PASS $DB_NAME -e "INSERT INTO admins (username, password) VALUES ('$admin_user', '$ADMIN_HASH');"
+    # Create admins table and insert admin user
+    mysql -u$DB_USER -p$DB_PASS $DB_NAME <<EOF
+CREATE TABLE admins (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    password VARCHAR(255) NOT NULL
+);
+INSERT INTO admins (username, password) VALUES ('$admin_user', '$(php -r "echo password_hash('$admin_pass', PASSWORD_BCRYPT);")');
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    uuid VARCHAR(36) NOT NULL,
+    server_id INT NOT NULL,
+    traffic_limit BIGINT NOT NULL,
+    traffic_used BIGINT DEFAULT 0,
+    connection_limit INT NOT NULL,
+    expiry_date DATE NOT NULL,
+    qr_path VARCHAR(255),
+    link TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE servers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ip VARCHAR(15) NOT NULL,
+    unique_code VARCHAR(16) NOT NULL,
+    name VARCHAR(50),
+    status ENUM('active', 'inactive') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE monitoring (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    server_id INT NOT NULL,
+    active_users INT,
+    bandwidth VARCHAR(50),
+    ping INT,
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+EOF
 
     # Set permissions
     chown -R www-data:www-data /var/www/html
     chmod -R 755 /var/www/html
+
+    # Configure Apache
+    cat > /etc/apache2/sites-available/pakhsheshkon.conf <<EOL
+<VirtualHost *:80>
+    ServerName localhost
+    DocumentRoot /var/www/html
+    <Directory /var/www/html>
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    ErrorLog \${APACHE_LOG_DIR}/pakhsheshkon-error.log
+    CustomLog \${APACHE_LOG_DIR}/pakhsheshkon-access.log combined
+</VirtualHost>
+EOL
+
+    a2ensite pakhsheshkon.conf
+    a2enmod rewrite
+    systemctl restart apache2
 
     echo -e "${GREEN}Installation completed! Access panel at http://$(curl -s ifconfig.me)/${NC}"
     echo -e "${GREEN}Admin Username: $admin_user${NC}"
@@ -83,7 +145,7 @@ EOL
 else
     # Install dependencies for abroad server
     echo -e "${YELLOW}Installing V2Ray and dependencies...${NC}"
-    apt install -y curl unzip ufw
+    apt install -y curl unzip ufw vnstat
 
     # Install V2Ray
     bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh)
@@ -98,7 +160,7 @@ else
 
     # Configure firewall
     ufw allow 80,443,10000:20000/tcp
-    ufw enable
+    ufw --force enable
 
     # Download and setup monitoring script
     curl -L -o /usr/local/bin/monitor.sh https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/scripts/monitor.sh
@@ -121,12 +183,12 @@ EOL
     systemctl enable pakhsheshkon-monitor
     systemctl start pakhsheshkon-monitor
 
+    # Ensure V2Ray starts on boot
+    systemctl enable v2ray
+    systemctl start v2ray
+
     echo -e "${GREEN}Abroad server setup completed!${NC}"
     echo -e "${GREEN}Use this unique code in Iran panel: $UNIQUE_CODE${NC}"
 fi
-
-# Ensure services restart on reboot
-systemctl enable v2ray
-systemctl start v2ray
 
 echo -e "${GREEN}Setup finished!${NC}"
