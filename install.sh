@@ -7,25 +7,51 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# ASCII Art for PAKHSHESH KON
+# ASCII Art Animation
 clear
 echo -e "${CYAN}"
 cat << "EOF"
- ____          _          _ _       
-|  _ \  ___   | |__   ___| | | ___  
-| | | |/ _ \  | '_ \ / __| | |/ _ \ 
-| |_| | (_) | | | | | (__| | |  __/ 
-|____/ \___/  |_| |_| \___|_|_|\___|
-
+ ___          _      _            _                   _         _   _               
+(  _`\       ( )    ( )          ( )                 ( )       ( ) ( )              
+| |_) )  _ _ | |/') | |__    ___ | |__     __    ___ | |__     | |/'/'   _     ___  
+| ,__/'/'_` )| , <  |  _ `\/',__)|  _ `\ /'__`\/',__)|  _ `\   | , <   /'_`\ /' _ `\
+| |   ( (_| || |\`\ | | | |\__, \| | | |(  ___/\__, \| | | |   | |\`\ ( (_) )| ( ) |
+(_)   `\__,_)(_) (_)(_) (_)(____/(_) (_)`\____)(____/(_) (_)   (_) (_)`\___/'(_) (_)
 EOF
-echo -e "${YELLOW}          Welcome to Pakhshesh Kon Installer!${NC}"
+echo -e "${NC}"
+sleep 1
+
+clear
+echo -e "${YELLOW}"
+cat << "EOF"
+ ___          _      _            _                   _         _   _               
+(  _`\       ( )    ( )          ( )                 ( )       ( ) ( )              
+| |_) )  _ _ | |/') | |__    ___ | |__     __    ___ | |__     | |/'/'   _     ___  
+| ,__/'/'_` )| , <  |  _ `\/',__)|  _ `\ /'__`\/',__)|  _ `\   | , <   /'_`\ /' _ `\
+| |   ( (_| || |\`\ | | | |\__, \| | | |(  ___/\__, \| | | |   | |\`\ ( (_) )| ( ) |
+(_)   `\__,_)(_) (_)(_) (_)(____/(_) (_)`\____)(____/(_) (_)   (_) (_)`\___/'(_) (_)
+EOF
+echo -e "${NC}"
+sleep 1
+
+clear
+echo -e "${GREEN}"
+cat << "EOF"
+ ___          _      _            _                   _         _   _               
+(  _`\       ( )    ( )          ( )                 ( )       ( ) ( )              
+| |_) )  _ _ | |/') | |__    ___ | |__     __    ___ | |__     | |/'/'   _     ___  
+| ,__/'/'_` )| , <  |  _ `\/',__)|  _ `\ /'__`\/',__)|  _ `\   | , <   /'_`\ /' _ `\
+| |   ( (_| || |\`\ | | | |\__, \| | | |(  ___/\__, \| | | |   | |\`\ ( (_) )| ( ) |
+(_)   `\__,_)(_) (_)(_) (_)(____/(_) (_)`\____)(____/(_) (_)   (_) (_)`\___/'(_) (_)
+EOF
+echo -e "${NC}"
+echo -e "${YELLOW}Welcome to Pakhshesh Kon Installer!${NC}"
 sleep 2
 
-# Animation
-for i in {1..3}; do
-    echo -e "${GREEN}Starting installation... [$i/3]${NC}"
-    sleep 1
-done
+# Generate random string
+generate_random_string() {
+    openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16
+}
 
 echo -e "${YELLOW}Is this server in Iran or Abroad? (iran/abroad)${NC}"
 read -p "Enter your choice: " server_location
@@ -40,13 +66,8 @@ fi
 echo -e "${YELLOW}Updating system...${NC}"
 apt update && apt upgrade -y
 
-# Generate random string function
-generate_random_string() {
-    openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16
-}
-
 if [[ "$server_location" == "iran" ]]; then
-    # Install dependencies for Iran server
+    # Install dependencies
     echo -e "${YELLOW}Installing Apache, PHP, MariaDB, and dependencies...${NC}"
     apt install -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer
 
@@ -154,7 +175,6 @@ EOF
     # Set permissions
     chown -R www-data:www-data /var/www/html
     chmod -R 755 /var/www/html
-    chmod 600 /var/www/html/includes/config.php
 
     # Configure Apache
     cat > /etc/apache2/sites-available/pakhsheshkon.conf <<EOL
@@ -175,8 +195,7 @@ EOL
     a2enmod rewrite
     systemctl restart apache2
 
-    echo -e "${GREEN}Installation completed! 🎉${NC}"
-    echo -e "${GREEN}Access panel at http://$(curl -s ifconfig.me)/${NC}"
+    echo -e "${GREEN}Installation completed! Access panel at http://$(curl -s ifconfig.me)/${NC}"
     echo -e "${GREEN}Admin Username: $admin_user${NC}"
     echo -e "${GREEN}Admin Password: [Your chosen password]${NC}"
 
@@ -206,7 +225,6 @@ else
     echo -e "${GREEN}Encrypted Server Code: $UNIQUE_CODE${NC}"
 
     # Save server config
-    mkdir -p /etc/pakhsheshkon
     cat > /etc/pakhsheshkon/server.conf <<EOL
 SERVER_IP=$SERVER_IP
 V2RAY_PORT=$V2RAY_PORT
@@ -215,7 +233,6 @@ SERVER_GROUP=$server_group
 SECRET_KEY=$SECRET_KEY
 UNIQUE_CODE=$UNIQUE_CODE
 EOL
-    chmod 600 /etc/pakhsheshkon/server.conf
 
     # Configure V2Ray
     cat > /usr/local/etc/v2ray/config.json <<EOL
@@ -271,11 +288,11 @@ EOL
     systemctl enable v2ray
     systemctl start v2ray
 
-    echo -e "${GREEN}Abroad server setup completed! 🎉${NC}"
+    echo -e "${GREEN}Abroad server setup completed!${NC}"
     echo -e "${GREEN}Server Name: $server_name${NC}"
     echo -e "${GREEN}Server Group: $server_group${NC}"
     echo -e "${GREEN}V2Ray Port: $V2RAY_PORT${NC}"
     echo -e "${GREEN}Use this encrypted code in Iran panel: $UNIQUE_CODE${NC}"
 fi
 
-echo -e "${CYAN}PAKHSHESH KON is ready to rock! 🚀${NC}"
+echo -e "${GREEN}Setup finished!${NC}"
