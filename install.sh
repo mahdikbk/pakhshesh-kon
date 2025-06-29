@@ -20,10 +20,15 @@ fi
 echo -e "${YELLOW}Updating system...${NC}"
 apt update && apt upgrade -y
 
+# Generate random string function
+generate_random_string() {
+    openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16
+}
+
 if [[ "$server_location" == "iran" ]]; then
     # Install dependencies for Iran server
     echo -e "${YELLOW}Installing Apache, PHP, MariaDB, and other dependencies...${NC}"
-    apt install -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php
+    apt install -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer
 
     # Start and enable services
     systemctl enable apache2
@@ -42,11 +47,11 @@ y
 y
 EOF
 
-    # Create database
+    # Create random database credentials
     echo -e "${YELLOW}Setting up database...${NC}"
-    DB_NAME="pakhsheshkon"
-    DB_USER="pakhsheshkon"
-    DB_PASS=$(openssl rand -base64 12)
+    DB_NAME="pk_$(generate_random_string)"
+    DB_USER="pkuser_$(generate_random_string)"
+    DB_PASS=$(generate_random_string)
     mysql -e "CREATE DATABASE $DB_NAME;"
     mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
     mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
@@ -66,6 +71,9 @@ EOF
     mv /var/www/html/panel/* /var/www/html/
     rm -rf /var/www/html/panel panel.zip
 
+    # Install composer dependencies (for QR code)
+    composer require endroid/qr-code -d /var/www/html
+
     # Configure database
     cat > /var/www/html/includes/config.php <<EOL
 <?php
@@ -73,10 +81,11 @@ define('DB_HOST', 'localhost');
 define('DB_NAME', '$DB_NAME');
 define('DB_USER', '$DB_USER');
 define('DB_PASS', '$DB_PASS');
+define('SECRET_KEY', '$(generate_random_string)');
 ?>
 EOL
 
-    # Create admins table and insert admin user
+    # Create database tables
     mysql -u$DB_USER -p$DB_PASS $DB_NAME <<EOF
 CREATE TABLE admins (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -100,8 +109,9 @@ CREATE TABLE users (
 CREATE TABLE servers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ip VARCHAR(15) NOT NULL,
-    unique_code VARCHAR(16) NOT NULL,
+    port INT NOT NULL,
     name VARCHAR(50),
+    unique_code VARCHAR(64) NOT NULL,
     status ENUM('active', 'inactive') DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -147,19 +157,60 @@ else
     echo -e "${YELLOW}Installing V2Ray and dependencies...${NC}"
     apt install -y curl unzip ufw vnstat
 
+    # Get server name
+    echo -e "${YELLOW}Enter a name for this server (e.g., Finland-1):${NC}"
+    read -p "Server Name: " server_name
+
+    # Generate random port
+    V2RAY_PORT=$((RANDOM % 10000 + 10000)) # Random port between 10000-20000
+    echo -e "${YELLOW}Generated V2Ray port: $V2RAY_PORT${NC}"
+
     # Install V2Ray
     bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh)
 
-    # Generate unique server code
+    # Generate encrypted server code
     SERVER_IP=$(curl -s ifconfig.me)
-    UNIQUE_CODE=$(echo -n "$SERVER_IP$(date +%s)" | sha256sum | head -c 16)
-    echo -e "${GREEN}Unique Server Code: $UNIQUE_CODE${NC}"
+    SECRET_KEY=$(generate_random_string)
+    SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name")
+    UNIQUE_CODE=$(echo -n "$SERVER_DATA" | openssl dgst -sha256 -hmac "$SECRET_KEY" | head -c 64)
+    echo -e "${GREEN}Encrypted Server Code: $UNIQUE_CODE${NC}"
+
+    # Save server config
+    cat > /etc/pakhsheshkon/server.conf <<EOL
+SERVER_IP=$SERVER_IP
+V2RAY_PORT=$V2RAY_PORT
+SERVER_NAME=$server_name
+SECRET_KEY=$SECRET_KEY
+UNIQUE_CODE=$UNIQUE_CODE
+EOL
 
     # Configure V2Ray
-    curl -L -o /usr/local/etc/v2ray/config.json https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/scripts/v2ray-config.json
+    cat > /usr/local/etc/v2ray/config.json <<EOL
+{
+  "inbounds": [
+    {
+      "port": $V2RAY_PORT,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    }
+  ]
+}
+EOL
 
     # Configure firewall
-    ufw allow 80,443,10000:20000/tcp
+    ufw allow 80,443,$V2RAY_PORT/tcp
     ufw --force enable
 
     # Download and setup monitoring script
@@ -188,7 +239,9 @@ EOL
     systemctl start v2ray
 
     echo -e "${GREEN}Abroad server setup completed!${NC}"
-    echo -e "${GREEN}Use this unique code in Iran panel: $UNIQUE_CODE${NC}"
+    echo -e "${GREEN}Server Name: $server_name${NC}"
+    echo -e "${GREEN}V2Ray Port: $V2RAY_PORT${NC}"
+    echo -e "${GREEN}Use this encrypted code in Iran panel: $UNIQUE_CODE${NC}"
 fi
 
 echo -e "${GREEN}Setup finished!${NC}"
