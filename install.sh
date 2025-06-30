@@ -47,10 +47,19 @@ animate_logo() {
 # Generate random string
 generate_random_string() {
     if ! command -v openssl >/dev/null 2>&1; then
-        echo -e "${RED}openssl not found! Installing...${NC}"
+        echo -e "${YELLOW}Installing openssl...${NC}"
         apt install -y openssl || { echo -e "${RED}openssl installation failed!${NC}"; echo "openssl installation failed" >> "$LOG_FILE"; exit 1; }
     fi
     openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16
+}
+
+# Check if running in interactive terminal
+check_interactive() {
+    if [[ ! -t 0 ]]; then
+        echo -e "${RED}This script must be run in an interactive terminal!${NC}"
+        echo "Non-interactive terminal detected" >> "$LOG_FILE"
+        exit 1
+    fi
 }
 
 # Check prerequisites
@@ -108,13 +117,19 @@ backup_server() {
 # Detect country
 detect_country() {
     echo -e "${YELLOW}Detecting server location...${NC}"
-    SERVER_IP=$(curl -s ifconfig.me || echo "Unknown")
-    COUNTRY=$(curl -s https://ipapi.co/country_name/ || echo "Unknown")
+    SERVER_IP=$(curl -s http://ip-api.com/json/ | jq -r '.query' || echo "Unknown")
+    COUNTRY=$(curl -s http://ip-api.com/json/ | jq -r '.country' || echo "Unknown")
+    if [[ "$SERVER_IP" == "Unknown" || "$COUNTRY" == "Unknown" ]]; then
+        echo -e "${YELLOW}Could not detect location, continuing anyway...${NC}"
+        SERVER_IP=$(curl -s ifconfig.me || echo "Unknown")
+        COUNTRY="Unknown"
+    fi
     echo -e "${CYAN}Server detected in: $COUNTRY (IP: $SERVER_IP)${NC}"
     echo "Detected country: $COUNTRY, IP: $SERVER_IP" >> "$LOG_FILE"
 }
 
 # Main menu
+check_interactive
 animate_logo
 check_prerequisites
 check_network
@@ -126,7 +141,8 @@ echo -e "${CYAN}Choose an option:${NC}"
 echo -e "1) Install Pakhshesh Kon"
 echo -e "2) Uninstall Pakhshesh Kon"
 echo -e "3) Exit"
-read -p "Enter your choice (1-3): " choice
+read -t 30 -p "Enter your choice (1-3): " choice || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for main menu" >> "$LOG_FILE"; exit 1; }
+echo "User chose option: $choice" >> "$LOG_FILE"
 
 if [[ "$choice" == "2" ]]; then
     echo -e "${RED}Uninstalling Pakhshesh Kon...${NC}"
@@ -139,7 +155,7 @@ if [[ "$choice" == "2" ]]; then
     if [[ -n "$DB_NAME" ]]; then
         mysql -e "DROP DATABASE $DB_NAME;" 2>/dev/null
     fi
-    apt purge -y apache2 nginx php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache python3-certbot-nginx fail2ban 2>/dev/null
+    apt purge -y apache2 nginx php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache python3-certbot-nginx fail2ban jq 2>/dev/null
     apt autoremove -y 2>/dev/null
     ufw reset --force 2>/dev/null
     ufw enable 2>/dev/null
@@ -156,7 +172,7 @@ fi
 echo -e "${CYAN}Select server type:${NC}"
 echo -e "1) Iran"
 echo -e "2) Abroad"
-read -p "Enter your choice (1-2): " server_type
+read -t 30 -p "Enter your choice (1-2): " server_type || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for server type" >> "$LOG_FILE"; exit 1; }
 if [[ "$server_type" == "1" ]]; then
     server_location="iran"
 elif [[ "$server_type" == "2" ]]; then
@@ -166,17 +182,19 @@ else
     echo "Invalid server type choice: $server_type" >> "$LOG_FILE"
     exit 1
 fi
+echo "Server type: $server_location" >> "$LOG_FILE"
 
 # Update system
 echo -e "${YELLOW}Updating system...${NC}"
 apt update && apt upgrade -y || { echo -e "${RED}System update failed!${NC}"; echo "System update failed" >> "$LOG_FILE"; exit 1; }
+echo "System updated" >> "$LOG_FILE"
 
 if [[ "$server_location" == "iran" ]]; then
     # Select web server
     echo -e "${CYAN}Select web server:${NC}"
     echo -e "1) Apache"
     echo -e "2) Nginx"
-    read -p "Enter your choice (1-2): " web_server
+    read -t 30 -p "Enter your choice (1-2): " web_server || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for web server" >> "$LOG_FILE"; exit 1; }
     if [[ "$web_server" == "1" ]]; then
         WEB_SERVER_PKG="apache2 libapache2-mod-php"
         WEB_SERVER_NAME="apache"
@@ -188,14 +206,17 @@ if [[ "$server_location" == "iran" ]]; then
         echo "Invalid web server choice: $web_server" >> "$LOG_FILE"
         exit 1
     fi
+    echo "Web server: $WEB_SERVER_NAME" >> "$LOG_FILE"
 
     # Install dependencies
     echo -e "${YELLOW}Installing $WEB_SERVER_NAME, PHP, MariaDB, and dependencies...${NC}"
-    apt install -y $WEB_SERVER_PKG php php-mysql mariadb-server unzip curl composer certbot python3-certbot-$WEB_SERVER_NAME fail2ban || { echo -e "${RED}Installation failed!${NC}"; echo "Dependency installation failed" >> "$LOG_FILE"; exit 1; }
+    apt install -y $WEB_SERVER_PKG php php-mysql mariadb-server unzip curl composer certbot python3-certbot-$WEB_SERVER_NAME fail2ban jq || { echo -e "${RED}Installation failed!${NC}"; echo "Dependency installation failed" >> "$LOG_FILE"; exit 1; }
+    echo "Dependencies installed" >> "$LOG_FILE"
 
     # Start and enable services
     systemctl enable $WEB_SERVER_NAME mariadb || { echo -e "${RED}Service enable failed!${NC}"; echo "Service enable failed" >> "$LOG_FILE"; exit 1; }
     systemctl start $WEB_SERVER_NAME mariadb
+    echo "Services enabled and started" >> "$LOG_FILE"
 
     # Configure fail2ban
     echo -e "${YELLOW}Configuring fail2ban...${NC}"
@@ -235,19 +256,20 @@ EOF
 
     # Get admin credentials
     echo -e "${YELLOW}Enter admin username for panel:${NC}"
-    read -p "Username: " admin_user
+    read -t 30 -p "Username: " admin_user || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for admin username" >> "$LOG_FILE"; exit 1; }
     echo -e "${YELLOW}Enter admin password:${NC}"
-    read -s -p "Password: " admin_pass
+    read -t 30 -s -p "Password: " admin_pass || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for admin password" >> "$LOG_FILE"; exit 1; }
     echo
     echo "Admin credentials set" >> "$LOG_FILE"
 
     # Get domain and base URL
     echo -e "${YELLOW}Enter domain for panel (e.g., panel.example.com, leave empty for no domain):${NC}"
-    read -p "Domain: " DOMAIN
+    read -t 30 -p "Domain: " DOMAIN || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for domain" >> "$LOG_FILE"; exit 1; }
     echo -e "${YELLOW}Enter base URL path (e.g., xxx for domain.com/xxx, leave empty for root):${NC}"
-    read -p "Base URL: " BASE_URL
+    read -t 30 -p "Base URL: " BASE_URL || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for base URL" >> "$LOG_FILE"; exit 1; }
     BASE_URL=${BASE_URL:-"panel"}
     DOCUMENT_ROOT="/var/www/html/$BASE_URL"
+    echo "Domain: $DOMAIN, Base URL: $BASE_URL" >> "$LOG_FILE"
 
     # Check domain
     if [[ -n "$DOMAIN" ]]; then
@@ -409,7 +431,7 @@ EOL
 else
     # Install WARP option
     echo -e "${CYAN}Install Cloudflare WARP for optimized traffic? (y/n)${NC}"
-    read -p "Choice: " install_warp
+    read -t 30 -p "Choice: " install_warp || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for WARP option" >> "$LOG_FILE"; exit 1; }
     if [[ "$install_warp" == "y" ]]; then
         echo -e "${YELLOW}Installing Cloudflare WARP...${NC}"
         curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
@@ -423,7 +445,8 @@ else
 
     # Install dependencies
     echo -e "${YELLOW}Installing V2Ray and dependencies...${NC}"
-    apt install -y curl unzip ufw vnstat fail2ban || { echo -e "${RED}Installation failed!${NC}"; echo "Dependency installation failed" >> "$LOG_FILE"; exit 1; }
+    apt install -y curl unzip ufw vnstat fail2ban jq || { echo -e "${RED}Installation failed!${NC}"; echo "Dependency installation failed" >> "$LOG_FILE"; exit 1; }
+    echo "Dependencies installed" >> "$LOG_FILE"
 
     # Configure fail2ban
     echo -e "${YELLOW}Configuring fail2ban...${NC}"
@@ -440,7 +463,8 @@ EOL
 
     # Get server name
     echo -e "${YELLOW}Enter a name for this server (e.g., Finland-1):${NC}"
-    read -p "Server Name: " server_name
+    read -t 30 -p "Server Name: " server_name || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for server name" >> "$LOG_FILE"; exit 1; }
+    echo "Server name: $server_name" >> "$LOG_FILE"
 
     # Generate random port
     V2RAY_PORT=$((RANDOM % 10000 + 10000))
@@ -449,9 +473,10 @@ EOL
 
     # Install V2Ray
     bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh) || { echo -e "${RED}V2Ray installation failed!${NC}"; echo "V2Ray installation failed" >> "$LOG_FILE"; exit 1; }
+    echo "V2Ray installed" >> "$LOG_FILE"
 
     # Generate encrypted server code
-    SERVER_IP=$(curl -s ifconfig.me)
+    SERVER_IP=$(curl -s http://ip-api.com/json/ | jq -r '.query' || curl -s ifconfig.me || echo "Unknown")
     SECRET_KEY=$(generate_random_string)
     SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name")
     UNIQUE_CODE=$(echo -n "$SERVER_DATA" | openssl dgst -sha256 -hmac "$SECRET_KEY" | head -c 64)
@@ -525,7 +550,7 @@ EOL
 
     # Test connection to Iran server
     echo -e "${YELLOW}Enter Iran server IP for connection test (or press Enter to skip):${NC}"
-    read -p "Iran Server IP: " IRAN_IP
+    read -t 30 -p "Iran Server IP: " IRAN_IP || { echo -e "${YELLOW}Input timeout, skipping connection test...${NC}"; echo "Input timeout for Iran IP" >> "$LOG_FILE"; }
     if [[ -n "$IRAN_IP" ]]; then
         if ping -c 3 "$IRAN_IP" >/dev/null 2>&1; then
             echo -e "${GREEN}Connection to Iran server ($IRAN_IP) successful!${NC}"
