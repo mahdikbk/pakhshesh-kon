@@ -56,7 +56,7 @@ generate_random_string() {
 # Check if running in interactive terminal
 check_interactive() {
     if [[ ! -t 0 ]]; then
-        echo -e "${RED}This script must be run in an interactive terminal!${NC}"
+        echo -e "${RED}This script must be run in an interactive terminal! Use 'bash install.sh' or ensure TTY is allocated (e.g., 'ssh -t').${NC}"
         echo "Non-interactive terminal detected" >> "$LOG_FILE"
         exit 1
     fi
@@ -79,7 +79,7 @@ check_prerequisites() {
 check_network() {
     echo -e "${YELLOW}Checking network connectivity...${NC}"
     if ! ping -c 1 google.com >/dev/null 2>&1; then
-        echo -e "${RED}No internet connection! Please check your network.${NC}"
+        echo -e "${RED}No internet connection! Please check your network and DNS settings (e.g., use 'nameserver 8.8.8.8' in /etc/resolv.conf).${NC}"
         echo "Network check failed" >> "$LOG_FILE"
         exit 1
     fi
@@ -141,8 +141,13 @@ echo -e "${CYAN}Choose an option:${NC}"
 echo -e "1) Install Pakhshesh Kon"
 echo -e "2) Uninstall Pakhshesh Kon"
 echo -e "3) Exit"
-read -t 30 -p "Enter your choice (1-3): " choice || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for main menu" >> "$LOG_FILE"; exit 1; }
+read -p "Enter your choice (1-3): " choice
 echo "User chose option: $choice" >> "$LOG_FILE"
+if [[ -z "$choice" ]]; then
+    echo -e "${RED}No input provided! Exiting...${NC}"
+    echo "No input provided for main menu" >> "$LOG_FILE"
+    exit 1
+fi
 
 if [[ "$choice" == "2" ]]; then
     echo -e "${RED}Uninstalling Pakhshesh Kon...${NC}"
@@ -172,7 +177,13 @@ fi
 echo -e "${CYAN}Select server type:${NC}"
 echo -e "1) Iran"
 echo -e "2) Abroad"
-read -t 30 -p "Enter your choice (1-2): " server_type || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for server type" >> "$LOG_FILE"; exit 1; }
+read -p "Enter your choice (1-2): " server_type
+echo "User chose server type: $server_type" >> "$LOG_FILE"
+if [[ -z "$server_type" ]]; then
+    echo -e "${RED}No input provided! Exiting...${NC}"
+    echo "No input provided for server type" >> "$LOG_FILE"
+    exit 1
+fi
 if [[ "$server_type" == "1" ]]; then
     server_location="iran"
 elif [[ "$server_type" == "2" ]]; then
@@ -194,7 +205,13 @@ if [[ "$server_location" == "iran" ]]; then
     echo -e "${CYAN}Select web server:${NC}"
     echo -e "1) Apache"
     echo -e "2) Nginx"
-    read -t 30 -p "Enter your choice (1-2): " web_server || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for web server" >> "$LOG_FILE"; exit 1; }
+    read -p "Enter your choice (1-2): " web_server
+    echo "User chose web server: $web_server" >> "$LOG_FILE"
+    if [[ -z "$web_server" ]]; then
+        echo -e "${RED}No input provided! Exiting...${NC}"
+        echo "No input provided for web server" >> "$LOG_FILE"
+        exit 1
+    fi
     if [[ "$web_server" == "1" ]]; then
         WEB_SERVER_PKG="apache2 libapache2-mod-php"
         WEB_SERVER_NAME="apache"
@@ -256,17 +273,30 @@ EOF
 
     # Get admin credentials
     echo -e "${YELLOW}Enter admin username for panel:${NC}"
-    read -t 30 -p "Username: " admin_user || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for admin username" >> "$LOG_FILE"; exit 1; }
+    read -p "Username: " admin_user
+    echo "Admin username entered: $admin_user" >> "$LOG_FILE"
+    if [[ -z "$admin_user" ]]; then
+        echo -e "${RED}No username provided! Exiting...${NC}"
+        echo "No username provided" >> "$LOG_FILE"
+        exit 1
+    fi
     echo -e "${YELLOW}Enter admin password:${NC}"
-    read -t 30 -s -p "Password: " admin_pass || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for admin password" >> "$LOG_FILE"; exit 1; }
+    read -s -p "Password: " admin_pass
     echo
-    echo "Admin credentials set" >> "$LOG_FILE"
+    echo "Admin password entered" >> "$LOG_FILE"
+    if [[ -z "$admin_pass" ]]; then
+        echo -e "${RED}No password provided! Exiting...${NC}"
+        echo "No password provided" >> "$LOG_FILE"
+        exit 1
+    fi
 
     # Get domain and base URL
     echo -e "${YELLOW}Enter domain for panel (e.g., panel.example.com, leave empty for no domain):${NC}"
-    read -t 30 -p "Domain: " DOMAIN || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for domain" >> "$LOG_FILE"; exit 1; }
+    read -p "Domain: " DOMAIN
+    echo "Domain entered: $DOMAIN" >> "$LOG_FILE"
     echo -e "${YELLOW}Enter base URL path (e.g., xxx for domain.com/xxx, leave empty for root):${NC}"
-    read -t 30 -p "Base URL: " BASE_URL || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for base URL" >> "$LOG_FILE"; exit 1; }
+    read -p "Base URL: " BASE_URL
+    echo "Base URL entered: $BASE_URL" >> "$LOG_FILE"
     BASE_URL=${BASE_URL:-"panel"}
     DOCUMENT_ROOT="/var/www/html/$BASE_URL"
     echo "Domain: $DOMAIN, Base URL: $BASE_URL" >> "$LOG_FILE"
@@ -431,7 +461,13 @@ EOL
 else
     # Install WARP option
     echo -e "${CYAN}Install Cloudflare WARP for optimized traffic? (y/n)${NC}"
-    read -t 30 -p "Choice: " install_warp || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for WARP option" >> "$LOG_FILE"; exit 1; }
+    read -p "Choice: " install_warp
+    echo "User chose WARP option: $install_warp" >> "$LOG_FILE"
+    if [[ -z "$install_warp" ]]; then
+        echo -e "${RED}No input provided! Exiting...${NC}"
+        echo "No input provided for WARP option" >> "$LOG_FILE"
+        exit 1
+    fi
     if [[ "$install_warp" == "y" ]]; then
         echo -e "${YELLOW}Installing Cloudflare WARP...${NC}"
         curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
@@ -463,8 +499,13 @@ EOL
 
     # Get server name
     echo -e "${YELLOW}Enter a name for this server (e.g., Finland-1):${NC}"
-    read -t 30 -p "Server Name: " server_name || { echo -e "${RED}Input timeout! Exiting...${NC}"; echo "Input timeout for server name" >> "$LOG_FILE"; exit 1; }
-    echo "Server name: $server_name" >> "$LOG_FILE"
+    read -p "Server Name: " server_name
+    echo "Server name entered: $server_name" >> "$LOG_FILE"
+    if [[ -z "$server_name" ]]; then
+        echo -e "${RED}No server name provided! Exiting...${NC}"
+        echo "No server name provided" >> "$LOG_FILE"
+        exit 1
+    fi
 
     # Generate random port
     V2RAY_PORT=$((RANDOM % 10000 + 10000))
@@ -550,7 +591,8 @@ EOL
 
     # Test connection to Iran server
     echo -e "${YELLOW}Enter Iran server IP for connection test (or press Enter to skip):${NC}"
-    read -t 30 -p "Iran Server IP: " IRAN_IP || { echo -e "${YELLOW}Input timeout, skipping connection test...${NC}"; echo "Input timeout for Iran IP" >> "$LOG_FILE"; }
+    read -p "Iran Server IP: " IRAN_IP
+    echo "Iran server IP entered: $IRAN_IP" >> "$LOG_FILE"
     if [[ -n "$IRAN_IP" ]]; then
         if ping -c 3 "$IRAN_IP" >/dev/null 2>&1; then
             echo -e "${GREEN}Connection to Iran server ($IRAN_IP) successful!${NC}"
