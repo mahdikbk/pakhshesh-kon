@@ -65,7 +65,7 @@ check_interactive() {
 # Check prerequisites
 check_prerequisites() {
     echo -e "${YELLOW}Checking prerequisites...${NC}"
-    for cmd in curl wget dig; do
+    for cmd in curl wget dig jq; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo -e "${YELLOW}Installing $cmd...${NC}"
             apt install -y "$cmd" || { echo -e "${RED}$cmd installation failed!${NC}"; echo "$cmd installation failed" >> "$LOG_FILE"; exit 1; }
@@ -117,8 +117,8 @@ backup_server() {
 # Detect country
 detect_country() {
     echo -e "${YELLOW}Detecting server location...${NC}"
-    SERVER_IP=$(curl -s http://ip-api.com/json/ | jq -r '.query' || echo "Unknown")
-    COUNTRY=$(curl -s http://ip-api.com/json/ | jq -r '.country' || echo "Unknown")
+    SERVER_IP=$(curl -s http://ip-api.com/json/ | jq -r '.query' 2>/dev/null || curl -s https://api.ipify.org || curl -s ifconfig.me || echo "Unknown")
+    COUNTRY=$(curl -s http://ip-api.com/json/ | jq -r '.country' 2>/dev/null || curl -s https://ipinfo.io/country || echo "Unknown")
     if [[ "$SERVER_IP" == "Unknown" || "$COUNTRY" == "Unknown" ]]; then
         echo -e "${YELLOW}Could not detect location, continuing anyway...${NC}"
         SERVER_IP=$(curl -s ifconfig.me || echo "Unknown")
@@ -476,7 +476,7 @@ EOL
     echo "V2Ray installed" >> "$LOG_FILE"
 
     # Generate encrypted server code
-    SERVER_IP=$(curl -s http://ip-api.com/json/ | jq -r '.query' || curl -s ifconfig.me || echo "Unknown")
+    SERVER_IP=$(curl -s http://ip-api.com/json/ | jq -r '.query' 2>/dev/null || curl -s https://api.ipify.org || curl -s ifconfig.me || echo "Unknown")
     SECRET_KEY=$(generate_random_string)
     SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name")
     UNIQUE_CODE=$(echo -n "$SERVER_DATA" | openssl dgst -sha256 -hmac "$SECRET_KEY" | head -c 64)
