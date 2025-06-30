@@ -50,24 +50,32 @@ generate_random_string() {
 # Check server resources
 check_resources() {
     echo -e "${YELLOW}Checking server resources...${NC}"
-    CPU_CORES=$(nproc)
-    RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
-    DISK_MB=$(df -m / | awk 'NR==2 {print $4}')
+    CPU_COUNT=$(nproc)
+    RAM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
+    DISK_FREE=$(df -h / | awk 'NR==2 {print $4}' | tr -d 'G')
     
-    if [[ $CPU_CORES -lt 1 || $RAM_MB -lt 512 || $DISK_MB -lt 2048 ]]; then
-        echo -e "${RED}Insufficient resources! Minimum: 1 CPU core, 512MB RAM, 2GB free disk.${NC}"
-        echo -e "${YELLOW}Current: $CPU_CORES cores, $RAM_MB MB RAM, $DISK_MB MB disk.${NC}"
+    if [[ $CPU_COUNT -lt 1 || $RAM_TOTAL -lt 512 || $DISK_FREE -lt 5 ]]; then
+        echo -e "${RED}Insufficient resources! Need at least 1 CPU, 512MB RAM, 5GB disk.${NC}"
         exit 1
     fi
-    echo -e "${GREEN}Resources OK: $CPU_CORES cores, $RAM_MB MB RAM, $DISK_MB MB disk.${NC}"
+    echo -e "${GREEN}Resources OK: $CPU_COUNT CPUs, $RAM_TOTAL MB RAM, $DISK_FREE GB disk free${NC}"
 }
 
 # Backup server
 backup_server() {
     echo -e "${YELLOW}Creating server backup...${NC}"
-    BACKUP_FILE="/root/pakhsheshkon-backup-$(date +%F).tar.gz"
-    tar -czf "$BACKUP_FILE" /etc /var/www 2>/dev/null
-    echo -e "${GREEN}Backup saved to $BACKUP_FILE${NC}"
+    BACKUP_DIR="/root/pakhsheshkon-backup-$(date +%F-%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+    tar -czf "$BACKUP_DIR/etc.tar.gz" /etc 2>/dev/null
+    tar -czf "$BACKUP_DIR/www.tar.gz" /var/www 2>/dev/null
+    echo -e "${GREEN}Backup saved to $BACKUP_DIR${NC}"
+}
+
+# Detect country
+detect_country() {
+    COUNTRY=$(curl -s https://ipapi.co/country_name/ || echo "Unknown")
+    SERVER_IP=$(curl -s ifconfig.me)
+    echo -e "${CYAN}Server detected in: $COUNTRY (IP: $SERVER_IP)${NC}"
 }
 
 # Main menu
@@ -75,7 +83,7 @@ animate_logo
 echo -e "${YELLOW}Welcome to Pakhshesh Kon!${NC}"
 check_resources
 backup_server
-
+detect_country
 echo -e "${CYAN}Choose an option:${NC}"
 echo -e "1) Install Pakhshesh Kon"
 echo -e "2) Uninstall Pakhshesh Kon"
@@ -93,7 +101,7 @@ if [[ "$choice" == "2" ]]; then
     if [[ -n "$DB_NAME" ]]; then
         mysql -e "DROP DATABASE $DB_NAME;"
     fi
-    apt purge -y apache2 nginx php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat fail2ban
+    apt purge -y apache2 nginx php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache python3-certbot-nginx fail2ban
     apt autoremove -y
     ufw reset --force
     ufw enable
@@ -104,60 +112,58 @@ elif [[ "$choice" != "1" ]]; then
     exit 0
 fi
 
-# Detect country
-COUNTRY=$(curl -s https://ipapi.co/country_name/ || echo "Unknown")
-SERVER_IP=$(curl -s ifconfig.me)
-echo -e "${YELLOW}Detected server location: $COUNTRY (IP: $SERVER_IP)${NC}"
-
-# Server type selection
+# Select server type
 echo -e "${CYAN}Select server type:${NC}"
 echo -e "1) Iran"
 echo -e "2) Abroad"
 read -p "Enter your choice (1-2): " server_type
-
 if [[ "$server_type" == "1" ]]; then
     server_location="iran"
 elif [[ "$server_type" == "2" ]]; then
     server_location="abroad"
 else
-    echo -e "${RED}Invalid choice! Please enter 1 or 2.${NC}"
+    echo -e "${RED}Invalid choice!${NC}"
     exit 1
 fi
 
 # Update system
 echo -e "${YELLOW}Updating system...${NC}"
-apt update && apt upgrade -y
+apt update && apt upgrade -y || { echo -e "${RED}System update failed!${NC}"; exit 1; }
 
 if [[ "$server_location" == "iran" ]]; then
-    # Web server selection
+    # Select web server
     echo -e "${CYAN}Select web server:${NC}"
     echo -e "1) Apache"
     echo -e "2) Nginx"
     read -p "Enter your choice (1-2): " web_server
     if [[ "$web_server" == "1" ]]; then
-        WEB_SERVER="apache"
-        apt install -y apache2 libapache2-mod-php
-        systemctl enable apache2
-        systemctl start apache2
+        WEB_SERVER_PKG="apache2 libapache2-mod-php"
+        WEB_SERVER_NAME="apache"
     elif [[ "$web_server" == "2" ]]; then
-        WEB_SERVER="nginx"
-        apt install -y nginx
-        systemctl enable nginx
-        systemctl start nginx
+        WEB_SERVER_PKG="nginx"
+        WEB_SERVER_NAME="nginx"
     else
-        echo -e "${RED}Invalid choice! Defaulting to Apache.${NC}"
-        WEB_SERVER="apache"
-        apt install -y apache2 libapache2-mod-php
-        systemctl enable apache2
-        systemctl start apache2
+        echo -e "${RED}Invalid choice!${NC}"
+        exit 1
     fi
 
     # Install dependencies
-    echo -e "${YELLOW}Installing dependencies...${NC}"
-    apt install -y php php-mysql mariadb-server unzip curl composer certbot python3-certbot-$WEB_SERVER fail2ban
+    echo -e "${YELLOW}Installing $WEB_SERVER_NAME, PHP, MariaDB, and dependencies...${NC}"
+    apt install -y $WEB_SERVER_PKG php php-mysql mariadb-server unzip curl composer certbot python3-certbot-$WEB_SERVER_NAME fail2ban || { echo -e "${RED}Installation failed!${NC}"; exit 1; }
 
-    # Setup fail2ban
+    # Start and enable services
+    systemctl enable $WEB_SERVER_NAME mariadb
+    systemctl start $WEB_SERVER_NAME mariadb
+
+    # Configure fail2ban
     echo -e "${YELLOW}Configuring fail2ban...${NC}"
+    cat > /etc/fail2ban/jail.local <<EOL
+[sshd]
+enabled = true
+port = ssh
+maxretry = 5
+bantime = 3600
+EOL
     systemctl enable fail2ban
     systemctl start fail2ban
 
@@ -177,7 +183,7 @@ EOF
     DB_NAME="pk_$(generate_random_string)"
     DB_USER="pkuser_$(generate_random_string)"
     DB_PASS=$(generate_random_string)
-    mysql -e "CREATE DATABASE $DB_NAME;"
+    mysql -e "CREATE DATABASE $DB_NAME;" || { echo -e "${RED}Database creation failed!${NC}"; exit 1; }
     mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
     mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
     mysql -e "FLUSH PRIVILEGES;"
@@ -190,51 +196,50 @@ EOF
     echo
 
     # Get domain and base URL
-    echo -e "${YELLOW}Enter domain for panel (e.g., panel.example.com, leave blank for no domain):${NC}"
+    echo -e "${YELLOW}Enter domain for panel (e.g., panel.example.com, leave empty for no domain):${NC}"
     read -p "Domain: " DOMAIN
-    echo -e "${YELLOW}Enter base URL path (e.g., xxx for domain.com/xxx, leave blank for root):${NC}"
+    echo -e "${YELLOW}Enter base URL path (e.g., xxx for domain.com/xxx, leave empty for root):${NC}"
     read -p "Base URL: " BASE_URL
-    BASE_URL=${BASE_URL:-"pakhsheshkon"}
+    BASE_URL=${BASE_URL:-"panel"}
     DOCUMENT_ROOT="/var/www/html/$BASE_URL"
 
     # Check domain
-    USE_SSL="no"
     if [[ -n "$DOMAIN" ]]; then
         echo -e "${YELLOW}Checking domain DNS...${NC}"
         DOMAIN_IP=$(dig +short "$DOMAIN" | tail -n1)
         if [[ "$DOMAIN_IP" != "$SERVER_IP" ]]; then
-            echo -e "${RED}Domain $DOMAIN does not point to this server ($SERVER_IP). Please update DNS.${NC}"
+            echo -e "${RED}Domain $DOMAIN does not point to this server ($SERVER_IP)!${NC}"
             exit 1
         fi
-
         # Check Cloudflare proxy
         CF_RAY=$(curl -s -I "http://$DOMAIN" | grep -i "CF-RAY" || echo "")
         if [[ -n "$CF_RAY" ]]; then
-            echo -e "${RED}Cloudflare proxy detected! Please disable proxy (orange cloud) for $DOMAIN.${NC}"
-            read -p "Continue without SSL? (y/n): " continue_without_ssl
-            if [[ "$continue_without_ssl" != "y" ]]; then
-                exit 1
-            fi
-        else
-            echo -e "${YELLOW}Installing SSL for $DOMAIN...${NC}"
-            if certbot --$WEB_SERVER -d "$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN"; then
-                USE_SSL="yes"
-            else
-                echo -e "${RED}SSL installation failed. Continuing without SSL.${NC}"
-            fi
+            echo -e "${RED}Cloudflare proxy detected! Please disable proxy for $DOMAIN and try again.${NC}"
+            exit 1
         fi
+        # Install SSL
+        echo -e "${YELLOW}Installing SSL for $DOMAIN...${NC}"
+        if ! certbot --$WEB_SERVER_NAME -d "$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN"; then
+            echo -e "${YELLOW}SSL installation failed, continuing with HTTP...${NC}"
+            PROTOCOL="http"
+        else
+            PROTOCOL="https"
+        fi
+    else
+        DOMAIN="localhost"
+        PROTOCOL="http"
     fi
 
     # Download and extract panel
     echo -e "${YELLOW}Downloading panel...${NC}"
+    curl -L -o panel.zip https://github.com/mahdikbk/pakhshesh-kon/releases/latest/download/panel.zip || { echo -e "${RED}Download failed!${NC}"; exit 1; }
     mkdir -p "$DOCUMENT_ROOT"
-    curl -L -o panel.zip https://github.com/mahdikbk/pakhshesh-kon/releases/latest/download/panel.zip
-    unzip panel.zip -d "$DOCUMENT_ROOT"
+    unzip panel.zip -d "$DOCUMENT_ROOT" || { echo -e "${RED}Unzip failed!${NC}"; exit 1; }
     mv "$DOCUMENT_ROOT/panel/"* "$DOCUMENT_ROOT/"
     rm -rf "$DOCUMENT_ROOT/panel" panel.zip
 
     # Install composer dependencies
-    composer require endroid/qr-code -d "$DOCUMENT_ROOT"
+    composer require endroid/qr-code -d "$DOCUMENT_ROOT" || { echo -e "${RED}Composer failed!${NC}"; exit 1; }
 
     # Configure database
     cat > "$DOCUMENT_ROOT/includes/config.php" <<EOL
@@ -244,7 +249,7 @@ define('DB_NAME', '$DB_NAME');
 define('DB_USER', '$DB_USER');
 define('DB_PASS', '$DB_PASS');
 define('SECRET_KEY', '$(generate_random_string)');
-define('BASE_URL', '$BASE_URL');
+define('BASE_URL', '/$BASE_URL');
 ?>
 EOL
 
@@ -299,10 +304,10 @@ EOF
     chmod -R 755 "$DOCUMENT_ROOT"
 
     # Configure web server
-    if [[ "$WEB_SERVER" == "apache" ]]; then
+    if [[ "$WEB_SERVER_NAME" == "apache" ]]; then
         cat > /etc/apache2/sites-available/pakhsheshkon.conf <<EOL
 <VirtualHost *:80>
-    ServerName ${DOMAIN:-localhost}
+    ServerName $DOMAIN
     DocumentRoot $DOCUMENT_ROOT
     <Directory $DOCUMENT_ROOT>
         Options Indexes FollowSymLinks
@@ -313,12 +318,6 @@ EOF
     CustomLog \${APACHE_LOG_DIR}/pakhsheshkon-access.log combined
 </VirtualHost>
 EOL
-        if [[ "$USE_SSL" == "yes" ]]; then
-            sed -i 's/:80/:443/' /etc/apache2/sites-available/pakhsheshkon.conf
-            echo "    SSLEngine on" >> /etc/apache2/sites-available/pakhsheshkon.conf
-            echo "    SSLCertificateFile /etc/letsencrypt/live/$DOMAIN/fullchain.pem" >> /etc/apache2/sites-available/pakhsheshkon.conf
-            echo "    SSLCertificateKeyFile /etc/letsencrypt/live/$DOMAIN/privkey.pem" >> /etc/apache2/sites-available/pakhsheshkon.conf
-        fi
         a2ensite pakhsheshkon.conf
         a2enmod rewrite
         systemctl restart apache2
@@ -326,11 +325,11 @@ EOL
         cat > /etc/nginx/sites-available/pakhsheshkon <<EOL
 server {
     listen 80;
-    server_name ${DOMAIN:-localhost};
+    server_name $DOMAIN;
     root $DOCUMENT_ROOT;
     index index.php;
     location / {
-        try_files \$uri \$uri/ /index.php?\$args;
+        try_files \$uri \$uri/ /index.php?\$query_string;
     }
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
@@ -340,44 +339,43 @@ server {
     }
 }
 EOL
-        if [[ "$USE_SSL" == "yes" ]]; then
-            sed -i 's/listen 80;/listen 443 ssl;/' /etc/nginx/sites-available/pakhsheshkon
-            echo "    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;" >> /etc/nginx/sites-available/pakhsheshkon
-            echo "    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;" >> /etc/nginx/sites-available/pakhsheshkon
-        fi
-        ln -sf /etc/nginx/sites-available/pakhsheshkon /etc/nginx/sites-enabled/
+        ln -s /etc/nginx/sites-available/pakhsheshkon /etc/nginx/sites-enabled/
         systemctl restart nginx
     fi
 
-    PROTOCOL="http"
-    [[ "$USE_SSL" == "yes" ]] && PROTOCOL="https"
-    PANEL_URL="${PROTOCOL}://${DOMAIN:-$SERVER_IP}/$BASE_URL"
-    echo -e "${GREEN}Installation completed! Access panel at $PANEL_URL${NC}"
+    echo -e "${GREEN}Installation completed! Access panel at $PROTOCOL://$DOMAIN/$BASE_URL${NC}"
     echo -e "${GREEN}Admin Username: $admin_user${NC}"
     echo -e "${GREEN}Admin Password: [Your chosen password]${NC}"
 
 else
-    # Install dependencies for abroad server
-    echo -e "${YELLOW}Installing V2Ray and dependencies...${NC}"
-    apt install -y curl unzip ufw vnstat fail2ban
-
-    # Setup fail2ban
-    echo -e "${YELLOW}Configuring fail2ban...${NC}"
-    systemctl enable fail2ban
-    systemctl start fail2ban
-
-    # Install Cloudflare WARP
+    # Install WARP option
     echo -e "${CYAN}Install Cloudflare WARP for optimized traffic? (y/n)${NC}"
     read -p "Choice: " install_warp
     if [[ "$install_warp" == "y" ]]; then
         echo -e "${YELLOW}Installing Cloudflare WARP...${NC}"
         curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-        echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ focal main" > /etc/apt/sources.list.d/cloudflare-client.list
+        echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ focal main" | tee /etc/apt/sources.list.d/cloudflare-client.list
         apt update
         apt install -y cloudflare-warp
-        warp-cli register
-        warp-cli connect
+        warp-cli --accept-tos register
+        warp-cli --accept-tos connect
     fi
+
+    # Install dependencies
+    echo -e "${YELLOW}Installing V2Ray and dependencies...${NC}"
+    apt install -y curl unzip ufw vnstat fail2ban || { echo -e "${RED}Installation failed!${NC}"; exit 1; }
+
+    # Configure fail2ban
+    echo -e "${YELLOW}Configuring fail2ban...${NC}"
+    cat > /etc/fail2ban/jail.local <<EOL
+[sshd]
+enabled = true
+port = ssh
+maxretry = 5
+bantime = 3600
+EOL
+    systemctl enable fail2ban
+    systemctl start fail2ban
 
     # Get server name
     echo -e "${YELLOW}Enter a name for this server (e.g., Finland-1):${NC}"
@@ -388,9 +386,10 @@ else
     echo -e "${YELLOW}Generated V2Ray port: $V2RAY_PORT${NC}"
 
     # Install V2Ray
-    bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh)
+    bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh) || { echo -e "${RED}V2Ray installation failed!${NC}"; exit 1; }
 
     # Generate encrypted server code
+    SERVER_IP=$(curl -s ifconfig.me)
     SECRET_KEY=$(generate_random_string)
     SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name")
     UNIQUE_CODE=$(echo -n "$SERVER_DATA" | openssl dgst -sha256 -hmac "$SECRET_KEY" | head -c 64)
@@ -437,7 +436,7 @@ EOL
     ufw --force enable
 
     # Download and setup monitoring script
-    curl -L -o /usr/local/bin/monitor.sh https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/scripts/monitor.sh
+    curl -L -o /usr/local/bin/monitor.sh https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/scripts/monitor.sh || { echo -e "${RED}Monitor script download failed!${NC}"; exit 1; }
     chmod +x /usr/local/bin/monitor.sh
 
     # Setup systemd service for monitoring
@@ -458,13 +457,13 @@ EOL
     systemctl start pakhsheshkon-monitor v2ray
 
     # Test connection to Iran server
-    echo -e "${YELLOW}Enter Iran server IP for connection test (leave blank to skip):${NC}"
-    read -p "Iran Server IP: " iran_ip
-    if [[ -n "$iran_ip" ]]; then
-        if curl -s -m 5 "http://$iran_ip" >/dev/null; then
-            echo -e "${GREEN}Connection to Iran server ($iran_ip) successful!${NC}"
+    echo -e "${YELLOW}Enter Iran server IP for connection test (or press Enter to skip):${NC}"
+    read -p "Iran Server IP: " IRAN_IP
+    if [[ -n "$IRAN_IP" ]]; then
+        if ping -c 3 "$IRAN_IP" >/dev/null 2>&1; then
+            echo -e "${GREEN}Connection to Iran server ($IRAN_IP) successful!${NC}"
         else
-            echo -e "${RED}Failed to connect to Iran server ($iran_ip). Please check network.${NC}"
+            echo -e "${RED}Connection to Iran server ($IRAN_IP) failed! Please check network.${NC}"
         fi
     fi
 
