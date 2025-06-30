@@ -41,11 +41,29 @@ animate_logo() {
     done
     clear
     echo -e "${GREEN}${LOGO}${NC}"
+    echo "Logo animation displayed" >> "$LOG_FILE"
 }
 
 # Generate random string
 generate_random_string() {
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo -e "${RED}openssl not found! Installing...${NC}"
+        apt install -y openssl || { echo -e "${RED}openssl installation failed!${NC}"; echo "openssl installation failed" >> "$LOG_FILE"; exit 1; }
+    fi
     openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16
+}
+
+# Check prerequisites
+check_prerequisites() {
+    echo -e "${YELLOW}Checking prerequisites...${NC}"
+    for cmd in curl wget dig; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo -e "${YELLOW}Installing $cmd...${NC}"
+            apt install -y "$cmd" || { echo -e "${RED}$cmd installation failed!${NC}"; echo "$cmd installation failed" >> "$LOG_FILE"; exit 1; }
+        fi
+    done
+    echo -e "${GREEN}Prerequisites OK${NC}"
+    echo "Prerequisites checked" >> "$LOG_FILE"
 }
 
 # Check network connectivity
@@ -57,6 +75,7 @@ check_network() {
         exit 1
     fi
     echo -e "${GREEN}Network OK${NC}"
+    echo "Network check passed" >> "$LOG_FILE"
 }
 
 # Check server resources
@@ -72,6 +91,7 @@ check_resources() {
         exit 1
     fi
     echo -e "${GREEN}Resources OK: $CPU_COUNT CPUs, $RAM_TOTAL MB RAM, $DISK_FREE GB disk free${NC}"
+    echo "Resources checked" >> "$LOG_FILE"
 }
 
 # Backup server
@@ -96,6 +116,7 @@ detect_country() {
 
 # Main menu
 animate_logo
+check_prerequisites
 check_network
 check_resources
 backup_server
@@ -262,7 +283,7 @@ EOF
 
     # Download and extract panel
     echo -e "${YELLOW}Downloading panel...${NC}"
-    curl -L -o panel.zip https://github.com/mahdikbk/pakhshesh-kon/releases/latest/download/panel.zip || { echo -e "${RED}Download failed!${NC}"; echo "Panel download failed" >> "$LOG_FILE"; exit 1; }
+    curl -L -o panel.zip https://github.com/mahdikbk/pakhshesh-kon/releases/latest/download/panel.zip || { echo -e "${RED}Download failed! Check your network or GitHub repository.${NC}"; echo "Panel download failed" >> "$LOG_FILE"; exit 1; }
     mkdir -p "$DOCUMENT_ROOT"
     unzip panel.zip -d "$DOCUMENT_ROOT" || { echo -e "${RED}Unzip failed!${NC}"; echo "Unzip failed" >> "$LOG_FILE"; exit 1; }
     mv "$DOCUMENT_ROOT/panel/"* "$DOCUMENT_ROOT/"
@@ -394,7 +415,7 @@ else
         curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
         echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ focal main" | tee /etc/apt/sources.list.d/cloudflare-client.list
         apt update
-        apt install -y cloudflare-warp
+        apt install -y cloudflare-warp || { echo -e "${RED}WARP installation failed!${NC}"; echo "WARP installation failed" >> "$LOG_FILE"; exit 1; }
         warp-cli --accept-tos register
         warp-cli --accept-tos connect
         echo "Cloudflare WARP installed" >> "$LOG_FILE"
