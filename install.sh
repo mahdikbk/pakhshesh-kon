@@ -5,54 +5,86 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
-# ASCII Art Animation
-clear
-echo -e "${CYAN}"
-cat << "EOF"
- ___          _      _            _                   _         _   _               
-(  _`\       ( )    ( )          ( )                 ( )       ( ) ( )              
-| |_) )  _ _ | |/') | |__    ___ | |__     __    ___ | |__     | |/'/'   _     ___  
-| ,__/'/'_` )| , <  |  _ `\/',__)|  _ `\ /'__`\/',__)|  _ `\   | , <   /'_`\ /' _ `\
-| |   ( (_| || |\`\ | | | |\__, \| | | |(  ___/\__, \| | | |   | |\`\ ( (_) )| ( ) |
-(_)   `\__,_)(_) (_)(_) (_)(____/(_) (_)`\____)(____/(_) (_)   (_) (_)`\___/'(_) (_)
+# ASCII Art for PAKHSHESH KON
+LOGO=$(cat << 'EOF'
+    ___          _      _            _                   _         _   _               
+   (  _`\       ( )    ( )          ( )                 ( )       ( ) ( )              
+   | |_) )  _ _ | |/') | |__    ___ | |__     __    ___ | |__     | |/'/'   _     ___  
+   | ,__/'/'_` )| , <  |  _ `\/',__)|  _ `\ /'__`\/',__)|  _ `\   | , <   /'_`\ /' _ `\
+   | |   ( (_| || |\`\ | | | |\__, \| | | |(  ___/\__, \| | | |   | |\`\ ( (_) )| ( ) |
+   (_)   `\__,_)(_) (_)(_) (_)(____/(_) (_)`\____)(____/(_) (_)   (_) (_)`\___/'(_) (_)
 EOF
-echo -e "${NC}"
-sleep 1
+)
 
-clear
-echo -e "${YELLOW}"
-cat << "EOF"
- ___          _      _            _                   _         _   _               
-(  _`\       ( )    ( )          ( )                 ( )       ( ) ( )              
-| |_) )  _ _ | |/') | |__    ___ | |__     __    ___ | |__     | |/'/'   _     ___  
-| ,__/'/'_` )| , <  |  _ `\/',__)|  _ `\ /'__`\/',__)|  _ `\   | , <   /'_`\ /' _ `\
-| |   ( (_| || |\`\ | | | |\__, \| | | |(  ___/\__, \| | | |   | |\`\ ( (_) )| ( ) |
-(_)   `\__,_)(_) (_)(_) (_)(____/(_) (_)`\____)(____/(_) (_)   (_) (_)`\___/'(_) (_)
-EOF
-echo -e "${NC}"
-sleep 1
-
-clear
-echo -e "${GREEN}"
-cat << "EOF"
- ___          _      _            _                   _         _   _               
-(  _`\       ( )    ( )          ( )                 ( )       ( ) ( )              
-| |_) )  _ _ | |/') | |__    ___ | |__     __    ___ | |__     | |/'/'   _     ___  
-| ,__/'/'_` )| , <  |  _ `\/',__)|  _ `\ /'__`\/',__)|  _ `\   | , <   /'_`\ /' _ `\
-| |   ( (_| || |\`\ | | | |\__, \| | | |(  ___/\__, \| | | |   | |\`\ ( (_) )| ( ) |
-(_)   `\__,_)(_) (_)(_) (_)(____/(_) (_)`\____)(____/(_) (_)   (_) (_)`\___/'(_) (_)
-EOF
-echo -e "${NC}"
-echo -e "${YELLOW}Welcome to Pakhshesh Kon Installer!${NC}"
-sleep 2
+# Animation function
+animate_logo() {
+    clear
+    echo -e "${CYAN}"
+    for ((i=0; i<${#LOGO}; i++)); do
+        printf "${LOGO:$i:1}"
+        sleep 0.005
+    done
+    echo -e "${NC}"
+    sleep 1
+    for color in RED GREEN YELLOW BLUE CYAN; do
+        clear
+        echo -e "${!color}${LOGO}${NC}"
+        sleep 0.2
+    done
+    clear
+    echo -e "${GREEN}${LOGO}${NC}"
+}
 
 # Generate random string
 generate_random_string() {
     openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16
 }
 
+# Main menu
+animate_logo
+echo -e "${YELLOW}Welcome to Pakhshesh Kon!${NC}"
+echo -e "${CYAN}Choose an option:${NC}"
+echo -e "1) Install Pakhshesh Kon"
+echo -e "2) Uninstall Pakhshesh Kon"
+echo -e "3) Exit"
+read -p "Enter your choice (1-3): " choice
+
+if [[ "$choice" == "2" ]]; then
+    echo -e "${RED}Uninstalling Pakhshesh Kon...${NC}"
+    # Stop services
+    systemctl stop apache2 mariadb v2ray pakhsheshkon-monitor 2>/dev/null
+    systemctl disable apache2 mariadb v2ray pakhsheshkon-monitor 2>/dev/null
+
+    # Remove files
+    rm -rf /var/www/html/* /etc/pakhsheshkon /usr/local/etc/v2ray /usr/local/bin/monitor.sh
+    rm -f /etc/systemd/system/pakhsheshkon-monitor.service
+    rm -f /etc/apache2/sites-available/pakhsheshkon.conf
+
+    # Remove database
+    DB_NAME=$(mysql -e "SHOW DATABASES LIKE 'pk_%'" | grep pk_ || echo "")
+    if [[ -n "$DB_NAME" ]]; then
+        mysql -e "DROP DATABASE $DB_NAME;"
+    fi
+
+    # Remove packages
+    apt purge -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat
+    apt autoremove -y
+
+    # Reset firewall
+    ufw reset --force
+    ufw enable
+
+    echo -e "${GREEN}Pakhshesh Kon completely uninstalled! Server is now clean.${NC}"
+    exit 0
+elif [[ "$choice" != "1" ]]; then
+    echo -e "${YELLOW}Exiting...${NC}"
+    exit 0
+fi
+
+# Installation process
 echo -e "${YELLOW}Is this server in Iran or Abroad? (iran/abroad)${NC}"
 read -p "Enter your choice: " server_location
 
@@ -72,10 +104,8 @@ if [[ "$server_location" == "iran" ]]; then
     apt install -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer
 
     # Start and enable services
-    systemctl enable apache2
-    systemctl start apache2
-    systemctl enable mariadb
-    systemctl start mariadb
+    systemctl enable apache2 mariadb
+    systemctl start apache2 mariadb
 
     # Secure MariaDB
     echo -e "${YELLOW}Securing MariaDB...${NC}"
@@ -106,7 +136,7 @@ EOF
     echo
 
     # Download and extract panel
-    echo -e "${YELLOW}Downloading and setting up panel...${NC}"
+    echo -e "${YELLOW}Downloading panel...${NC}"
     curl -L -o panel.zip https://github.com/mahdikbk/pakhshesh-kon/releases/latest/download/panel.zip
     unzip panel.zip -d /var/www/html/
     mv /var/www/html/panel/* /var/www/html/
@@ -147,19 +177,19 @@ CREATE TABLE users (
     link TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE server_groups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE servers (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    group_id INT NOT NULL,
     ip VARCHAR(15) NOT NULL,
     port INT NOT NULL,
     name VARCHAR(50),
     unique_code VARCHAR(64) NOT NULL,
-    group_id INT NOT NULL,
     status ENUM('active', 'inactive') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE server_groups (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(50) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE monitoring (
@@ -204,11 +234,9 @@ else
     echo -e "${YELLOW}Installing V2Ray and dependencies...${NC}"
     apt install -y curl unzip ufw vnstat
 
-    # Get server name and group
+    # Get server name
     echo -e "${YELLOW}Enter a name for this server (e.g., Finland-1):${NC}"
     read -p "Server Name: " server_name
-    echo -e "${YELLOW}Enter server group (e.g., Europe, Asia, America):${NC}"
-    read -p "Group Name: " server_group
 
     # Generate random port
     V2RAY_PORT=$((RANDOM % 10000 + 10000))
@@ -220,19 +248,20 @@ else
     # Generate encrypted server code
     SERVER_IP=$(curl -s ifconfig.me)
     SECRET_KEY=$(generate_random_string)
-    SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name|$server_group")
+    SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name")
     UNIQUE_CODE=$(echo -n "$SERVER_DATA" | openssl dgst -sha256 -hmac "$SECRET_KEY" | head -c 64)
     echo -e "${GREEN}Encrypted Server Code: $UNIQUE_CODE${NC}"
 
     # Save server config
+    mkdir -p /etc/pakhsheshkon
     cat > /etc/pakhsheshkon/server.conf <<EOL
 SERVER_IP=$SERVER_IP
 V2RAY_PORT=$V2RAY_PORT
 SERVER_NAME=$server_name
-SERVER_GROUP=$server_group
 SECRET_KEY=$SECRET_KEY
 UNIQUE_CODE=$UNIQUE_CODE
 EOL
+    chmod 600 /etc/pakhsheshkon/server.conf
 
     # Configure V2Ray
     cat > /usr/local/etc/v2ray/config.json <<EOL
@@ -281,16 +310,11 @@ Restart=always
 WantedBy=multi-user.target
 EOL
 
-    systemctl enable pakhsheshkon-monitor
-    systemctl start pakhsheshkon-monitor
-
-    # Ensure V2Ray starts on boot
-    systemctl enable v2ray
-    systemctl start v2ray
+    systemctl enable pakhsheshkon-monitor v2ray
+    systemctl start pakhsheshkon-monitor v2ray
 
     echo -e "${GREEN}Abroad server setup completed!${NC}"
     echo -e "${GREEN}Server Name: $server_name${NC}"
-    echo -e "${GREEN}Server Group: $server_group${NC}"
     echo -e "${GREEN}V2Ray Port: $V2RAY_PORT${NC}"
     echo -e "${GREEN}Use this encrypted code in Iran panel: $UNIQUE_CODE${NC}"
 fi
