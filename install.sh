@@ -56,21 +56,6 @@ animate_logo() {
     sleep 1
 }
 
-# Loading animation
-show_loading() {
-    local msg=$1
-    local progress=$2
-    local max=100
-    local bar_width=50
-    local filled=$((bar_width * progress / max))
-    local empty=$((bar_width - filled))
-    printf "\r${YELLOW}%s: [" "$msg"
-    for ((i=0; i<filled; i++)); do printf "#"; done
-    for ((i=0; i<empty; i++)); do printf "-"; done
-    printf "] %d%%${NC}" "$progress"
-    sleep 0.5
-}
-
 # Generate random string
 generate_random_string() {
     openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32
@@ -78,10 +63,6 @@ generate_random_string() {
 
 # Detect server location
 detect_location() {
-    if ! command -v jq &> /dev/null; then
-        echo "Unable to detect location (jq not installed)"
-        return
-    fi
     RESPONSE=$(curl -s http://ip-api.com/json)
     COUNTRY=$(echo "$RESPONSE" | jq -r '.country')
     CITY=$(echo "$RESPONSE" | jq -r '.city')
@@ -97,7 +78,7 @@ detect_location() {
 check_domain() {
     DOMAIN=$1
     SERVER_IP=$(curl -s ifconfig.me)
-    RESOLVED_IP=$(dig +short $DOMAIN @8.8.8.8 | tail -n 1)
+    RESOLVED_IP=$(dig @8.8.8.8 +short $DOMAIN | tail -n 1)
     if [[ "$RESOLVED_IP" == "$SERVER_IP" ]]; then
         return 0
     else
@@ -107,6 +88,7 @@ check_domain() {
 
 # Check server health
 check_server_health() {
+    echo -e "${YELLOW}Checking server health...${NC}"
     CPU=$(grep -c processor /proc/cpuinfo)
     RAM=$(free -m | awk '/Mem:/ {print $2}')
     DISK=$(df -h / | awk 'NR==2 {print $4}' | tr -d 'G')
@@ -117,6 +99,7 @@ check_server_health() {
             exit 1
         fi
     fi
+    echo -e "${GREEN}Server health OK${NC}"
 }
 
 # Log function
@@ -124,10 +107,19 @@ log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> /var/log/pakhsheshkon.log
 }
 
+# Progress bar
+progress_bar() {
+    echo -e "${YELLOW}$1 [          ]${NC}\r"
+    for i in {1..10}; do
+        echo -ne "${YELLOW}$1 [${GREEN}$(printf '%*s' $i | tr ' ' '#') $(printf '%*s' $((10-i)) )${YELLOW}]${NC}\r"
+        sleep 0.5
+    done
+    echo -e "${YELLOW}$1 [${GREEN}########## OK${YELLOW}]${NC}"
+}
+
 # Main menu
 animate_logo
 echo -e "${YELLOW}Welcome to Pakhshesh Kon!${NC}"
-show_loading "Detecting server location" 5
 SERVER_LOCATION=$(detect_location)
 echo -e "${CYAN}Detected server location: $SERVER_LOCATION${NC}"
 echo -e "${CYAN}Choose an option:${NC}"
@@ -137,31 +129,25 @@ echo -e "3) Exit"
 read -p "Enter your choice (1-3): " choice
 
 if [[ "$choice" == "2" ]]; then
-    echo -e "${RED}Uninstalling Pakhshesh Kon...${NC}"
+    progress_bar "Uninstalling Pakhshesh Kon"
     log "Starting uninstall process"
-    show_loading "Stopping services" 20
     systemctl stop apache2 mariadb v2ray pakhsheshkon-monitor 2>/dev/null
     systemctl disable apache2 mariadb v2ray pakhsheshkon-monitor 2>/dev/null
-    show_loading "Removing files" 40
     rm -rf /var/www/html/* /etc/pakhsheshkon /usr/local/etc/v2ray /usr/local/bin/monitor.sh
     rm -f /etc/systemd/system/pakhsheshkon-monitor.service
     rm -f /etc/apache2/sites-available/pakhsheshkon.conf
-    show_loading "Dropping database" 60
     DB_NAME=$(mysql -e "SHOW DATABASES LIKE 'pk_%'" | grep pk_ || echo "")
     if [[ -n "$DB_NAME" ]]; then
         mysql -e "DROP DATABASE $DB_NAME;"
         log "Dropped database $DB_NAME"
     fi
-    show_loading "Removing packages" 80
     apt purge -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache jq glances
     apt autoremove -y
-    show_loading "Resetting firewall" 90
     ufw reset --force
     ufw enable
     rm -rf /var/backups/pakhsheshkon
-    show_loading "Uninstall complete" 100
-    echo -e "\n${GREEN}Pakhshesh Kon completely uninstalled! Server is now clean.${NC}"
     log "Uninstall completed"
+    echo -e "${GREEN}Pakhshesh Kon completely uninstalled! Server is now clean.${NC}"
     exit 0
 elif [[ "$choice" != "1" ]]; then
     echo -e "${YELLOW}Exiting...${NC}"
@@ -186,36 +172,84 @@ else
 fi
 
 # Update system and install prerequisites
-show_loading "Updating system" 10
+progress_bar "Updating system"
+log "Updating system"
 apt update && apt upgrade -y
-apt install -y curl jq unzip ntp
+apt install -y curl jq unzip ntp apache2 php php-mysql mariadb-server libapache2-mod-php composer certbot python3-certbot-apache jq glances
 ntpdate pool.ntp.org
 log "System updated and NTP synchronized"
 
 # Check server health
-show_loading "Checking server health" 20
 check_server_health
 log "Server health checked"
 
 # Backup initial config
-show_loading "Creating initial backup" 30
+progress_bar "Creating initial backup"
 mkdir -p /var/backups/pakhsheshkon
 tar -czf /var/backups/pakhsheshkon/initial_backup_$(date +%F).tar.gz /etc 2>/dev/null
 log "Initial backup created"
 
 if [[ "$server_location" == "iran" ]]; then
-    # Install dependencies
-    show_loading "Installing dependencies" 40
-    apt install -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer certbot python3-certbot-apache jq glances
-    log "Installed dependencies for Iran server"
+    # Install V2Ray for Iran server
+    progress_bar "Installing V2Ray"
+    bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh)
+    V2RAY_PORT=$((RANDOM % 50000 + 10000))
+    while netstat -tuln | grep -q ":$V2RAY_PORT"; do
+        V2RAY_PORT=$((RANDOM % 50000 + 10000))
+    done
+    echo -e "${YELLOW}Generated V2Ray port: $V2RAY_PORT${NC}"
+    log "Generated V2Ray port: $V2RAY_PORT"
 
-    # Start and enable services
-    systemctl enable apache2 mariadb
-    systemctl start apache2 mariadb
-    log "Started Apache and MariaDB"
+    # Configure V2Ray
+    progress_bar "Configuring V2Ray"
+    SERVER_IP=$(curl -s ifconfig.me)
+    cat > /usr/local/etc/v2ray/config.json <<EOL
+{
+  "inbounds": [
+    {
+      "port": $V2RAY_PORT,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "/etc/letsencrypt/live/$SERVER_IP/fullchain.pem",
+              "keyFile": "/etc/letsencrypt/live/$SERVER_IP/privkey.pem"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    }
+  ]
+}
+EOL
+    if certbot certonly --standalone -d "$SERVER_IP" --non-interactive --agree-tos --email admin@$SERVER_IP; then
+        echo -e "${GREEN}TLS certificate installed for V2Ray.${NC}"
+        log "TLS installed for V2Ray"
+    else
+        echo -e "${YELLOW}Using self-signed certificate for V2Ray...${NC}"
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/pakhsheshkon/v2ray.key -out /etc/pakhsheshkon/v2ray.crt -subj "/CN=$SERVER_IP"
+        mv /etc/pakhsheshkon/v2ray.crt /etc/letsencrypt/live/$SERVER_IP/fullchain.pem
+        mv /etc/pakhsheshkon/v2ray.key /etc/letsencrypt/live/$SERVER_IP/privkey.pem
+        log "Generated self-signed certificate for V2Ray"
+    fi
+    systemctl enable v2ray
+    systemctl start v2ray
+    log "V2Ray configured"
 
     # Secure MariaDB
-    show_loading "Securing MariaDB" 50
+    progress_bar "Securing MariaDB"
     mysql_secure_installation <<EOF
 
 y
@@ -227,7 +261,7 @@ EOF
     log "Secured MariaDB"
 
     # Create random database credentials
-    show_loading "Setting up database" 60
+    progress_bar "Setting up database"
     DB_NAME="pk_$(generate_random_string)"
     DB_USER="pkuser_$(generate_random_string)"
     DB_PASS=$(generate_random_string)
@@ -237,78 +271,28 @@ EOF
     mysql -e "FLUSH PRIVILEGES;"
     log "Created database $DB_NAME"
 
-    # Create database tables
-    show_loading "Creating database tables" 70
-    mysql -u$DB_USER -p$DB_PASS $DB_NAME <<EOF
-CREATE TABLE admins (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL,
-    password VARCHAR(255) NOT NULL
-);
-CREATE TABLE users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL,
-    uuid VARCHAR(36) NOT NULL,
-    server_group_id INT NOT NULL,
-    traffic_limit BIGINT NOT NULL,
-    traffic_used BIGINT DEFAULT 0,
-    connection_limit INT NOT NULL,
-    expiry_date DATE NOT NULL,
-    qr_path VARCHAR(255),
-    link TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE server_groups (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(50) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE servers (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    group_id INT NOT NULL,
-    ip VARCHAR(15) NOT NULL,
-    port INT NOT NULL,
-    name VARCHAR(50),
-    unique_code VARCHAR(64) NOT NULL,
-    status ENUM('active', 'inactive') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE monitoring (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    server_id INT NOT NULL,
-    active_users INT,
-    bandwidth VARCHAR(50),
-    ping INT,
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE tickets (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(100) NOT NULL,
-    message TEXT NOT NULL,
-    user_id INT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE logs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    action VARCHAR(255) NOT NULL,
-    username VARCHAR(50),
-    ip VARCHAR(45),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-EOF
-    log "Created database tables"
+    # Test database connection
+    progress_bar "Testing database connection"
+    if mysql -u$DB_USER -p$DB_PASS -e "SELECT 1" $DB_NAME >/dev/null 2>&1; then
+        echo -e "${GREEN}Database connection successful${NC}"
+        log "Database connection successful"
+    else
+        echo -e "${RED}Database connection failed${NC}"
+        log "Database connection failed"
+        exit 1
+    fi
 
     # Get admin credentials
-    show_loading "Getting admin credentials" 80
+    progress_bar "Getting admin credentials"
     echo -e "${YELLOW}Enter admin username for panel:${NC}"
     read -p "Username: " admin_user
     echo -e "${YELLOW}Enter admin password:${NC}"
     read -s -p "Password: " admin_pass
     echo
-    mysql -u$DB_USER -p$DB_PASS $DB_NAME -e "INSERT INTO admins (username, password) VALUES ('$admin_user', '$(php -r "echo password_hash('$admin_pass', PASSWORD_BCRYPT);")');"
     log "Received admin credentials"
 
     # Get domain and base URL
+    progress_bar "Getting domain and base URL"
     echo -e "${YELLOW}Enter domain for panel (e.g., example.com or panel.example.com):${NC}"
     read -p "Domain: " domain
     echo -e "${YELLOW}Enter base URL path (e.g., xxx for domain.com/xxx, leave empty for root):${NC}"
@@ -323,7 +307,7 @@ EOF
     log "Domain: $domain, Base URL: $base_url"
 
     # Check domain resolution
-    show_loading "Checking domain resolution" 85
+    progress_bar "Checking domain resolution"
     if check_domain "$domain"; then
         echo -e "${GREEN}Domain $domain resolves to this server.${NC}"
         log "Domain $domain resolved successfully"
@@ -338,8 +322,8 @@ EOF
         fi
     fi
 
-    # Setup SSL with HSTS
-    show_loading "Setting up SSL" 90
+    # Setup SSL
+    progress_bar "Setting up SSL"
     if certbot --apache -d "$domain" --non-interactive --agree-tos --email admin@$domain --hsts; then
         echo -e "${GREEN}SSL certificate installed successfully.${NC}"
         protocol="https"
@@ -351,25 +335,24 @@ EOF
     fi
 
     # Configure PHP
-    show_loading "Configuring PHP" 95
+    progress_bar "Configuring PHP"
     sed -i 's/upload_max_filesize = .*/upload_max_filesize = 10M/' /etc/php/*/apache2/php.ini
     sed -i 's/allow_url_fopen = .*/allow_url_fopen = Off/' /etc/php/*/apache2/php.ini
     sed -i 's/disable_functions = .*/disable_functions = exec,passthru,shell_exec,system/' /etc/php/*/apache2/php.ini
     log "Configured PHP settings"
 
     # Setup database backup cron
-    show_loading "Setting up daily backup" 97
+    progress_bar "Setting up daily database backup"
     echo "0 2 * * * root mysqldump -u$DB_USER -p$DB_PASS $DB_NAME > /var/backups/pakhsheshkon/db_backup_$(date +%F).sql" >> /etc/crontab
     log "Configured daily database backup"
 
     # Create panel files
-    show_loading "Creating panel files" 98
-    mkdir -p "$install_path/assets/css" "$install_path/assets/js" "$install_path/assets/fonts" "$install_path/includes" "$install_path/qrcodes"
-    chmod -R 755 "$install_path"
-    chown -R www-data:www-data "$install_path"
+    progress_bar "Creating panel files"
+    mkdir -p "$install_path/includes" "$install_path/assets/css" "$install_path/assets/js" "$install_path/assets/fonts" "$install_path/qrcodes"
+    chmod 777 "$install_path/qrcodes"
 
     # index.php
-    cat > "$install_path/index.php" <<'EOF'
+    cat > "$install_path/index.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -395,7 +378,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <title>ورود - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
 <body class="bg-gradient bg-primary">
@@ -422,13 +405,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </div>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-EOF
+EOL
 
     # dashboard.php
-    cat > "$install_path/dashboard.php" <<'EOF'
+    cat > "$install_path/dashboard.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -446,9 +429,9 @@ $stats = getDashboardStats();
 <head>
     <meta charset="UTF-8">
     <title>داشبورد - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
-    <script src="assets/js/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <?php include 'includes/nav.php'; ?>
@@ -499,7 +482,7 @@ $stats = getDashboardStats();
             </div>
         </div>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/script.js"></script>
     <script>
         new Chart(document.getElementById('trafficChart'), {
@@ -528,10 +511,10 @@ $stats = getDashboardStats();
     </script>
 </body>
 </html>
-EOF
+EOL
 
     # users.php
-    cat > "$install_path/users.php" <<'EOF'
+    cat > "$install_path/users.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -560,7 +543,7 @@ $users = $db->query("SELECT u.*, g.name AS group_name FROM users u JOIN server_g
 <head>
     <meta charset="UTF-8">
     <title>مدیریت کاربران - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
 <body>
@@ -606,6 +589,7 @@ $users = $db->query("SELECT u.*, g.name AS group_name FROM users u JOIN server_g
                     <th>ترافیک (GB)</th>
                     <th>اتصال</th>
                     <th>انقضا</th>
+                    <th>لینک</th>
                     <th>QR کد</th>
                 </tr>
             </thead>
@@ -614,9 +598,10 @@ $users = $db->query("SELECT u.*, g.name AS group_name FROM users u JOIN server_g
                     echo "<tr>
                         <td>{$user['username']}</td>
                         <td>{$user['group_name']}</td>
-                        <td>{$user['traffic_limit']}</td>
+                        <td>" . ($user['traffic_limit'] / (1024 * 1024 * 1024)) . "</td>
                         <td>{$user['connection_limit']}</td>
                         <td>{$user['expiry_date']}</td>
+                        <td><a href='{$user['link']}' class='btn btn-sm btn-link'>لینک</a></td>
                         <td><button class='btn btn-sm btn-info' data-bs-toggle='modal' data-bs-target='#qrModal{$user['id']}'>نمایش</button></td>
                     </tr>";
                     echo "<div class='modal fade' id='qrModal{$user['id']}' tabindex='-1'>
@@ -637,13 +622,13 @@ $users = $db->query("SELECT u.*, g.name AS group_name FROM users u JOIN server_g
             </tbody>
         </table>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-EOF
+EOL
 
     # servers.php
-    cat > "$install_path/servers.php" <<'EOF'
+    cat > "$install_path/servers.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -670,11 +655,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $serverData['name'],
             $code
         ]);
-        $db->prepare("INSERT INTO logs (action, username, ip, created_at) VALUES (?, ?, ?, NOW())")->execute([
-            "Server added: {$serverData['name']}",
-            $_SESSION['username'],
-            $_SERVER['REMOTE_ADDR']
-        ]);
         $success = "سرور با موفقیت به گروه اضافه شد!";
     } else {
         $error = "کد سرور نامعتبر است.";
@@ -689,7 +669,7 @@ $servers = $db->query("SELECT s.*, g.name AS group_name FROM servers s JOIN serv
 <head>
     <meta charset="UTF-8">
     <title>مدیریت سرورها - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
 <body>
@@ -741,14 +721,14 @@ $servers = $db->query("SELECT s.*, g.name AS group_name FROM servers s JOIN serv
             </tbody>
         </table>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/script.js"></script>
 </body>
 </html>
-EOF
+EOL
 
     # server-groups.php
-    cat > "$install_path/server-groups.php" <<'EOF'
+    cat > "$install_path/server-groups.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -762,11 +742,6 @@ if (!isLoggedIn()) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $group_name = $_POST['group_name'];
     $db->prepare("INSERT INTO server_groups (name) VALUES (?)")->execute([$group_name]);
-    $db->prepare("INSERT INTO logs (action, username, ip, created_at) VALUES (?, ?, ?, NOW())")->execute([
-        "Server group added: $group_name",
-        $_SESSION['username'],
-        $_SERVER['REMOTE_ADDR']
-    ]);
     $success = "گروه با موفقیت اضافه شد!";
 }
 
@@ -777,7 +752,7 @@ $groups = $db->query("SELECT * FROM server_groups")->fetchAll();
 <head>
     <meta charset="UTF-8">
     <title>گروه‌های سرور - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
 <body>
@@ -810,13 +785,13 @@ $groups = $db->query("SELECT * FROM server_groups")->fetchAll();
             </tbody>
         </table>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-EOF
+EOL
 
     # monitoring.php
-    cat > "$install_path/monitoring.php" <<'EOF'
+    cat > "$install_path/monitoring.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -834,9 +809,9 @@ $servers = $db->query("SELECT s.*, g.name AS group_name FROM servers s JOIN serv
 <head>
     <meta charset="UTF-8">
     <title>مانیتورینگ - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
-    <script src="assets/js/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <?php include 'includes/nav.php'; ?>
@@ -861,14 +836,14 @@ $servers = $db->query("SELECT s.*, g.name AS group_name FROM servers s JOIN serv
             <?php } ?>
         </div>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/script.js"></script>
 </body>
 </html>
-EOF
+EOL
 
     # settings.php
-    cat > "$install_path/settings.php" <<'EOF'
+    cat > "$install_path/settings.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -889,7 +864,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <title>تنظیمات - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
 <body>
@@ -907,31 +882,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <button type="submit" class="btn btn-primary">ذخیره</button>
         </form>
-        <h3>آپدیت پنل</h3>
-        <button class="btn btn-primary" onclick="updatePanel()">آپدیت پنل</button>
-        <div id="updateProgress" class="mt-3"></div>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
-    <script src="assets/js/script.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-EOF
+EOL
 
     # update.php
-    cat > "$install_path/update.php" <<'EOF'
+    cat > "$install_path/update.php" <<'EOL'
 <?php
-header('Content-Type: application/json');
+session_start();
+require_once 'includes/auth.php';
+
+if (!isLoggedIn()) {
+    header('Location: index.php');
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $output = shell_exec('cd /var/www/html && curl -L -o panel.zip https://github.com/mahdikbk/pakhshesh-kon/releases/latest/download/panel.zip && unzip -o panel.zip -d /var/www/html/ && mv /var/www/html/panel/* /var/www/html/ && rm -rf /var/www/html/panel panel.zip');
-    echo json_encode(['status' => 'success', 'message' => 'Panel updated successfully']);
-} else {
-    echo json_encode(['status' => 'error', 'message' => 'Invalid request']);
+    $output = shell_exec('cd /var/www/html/' . (BASE_URL ? BASE_URL : '') . ' && curl -L -o panel.zip https://github.com/mahdikbk/pakhshesh-kon/releases/latest/download/panel.zip && unzip -o panel.zip -d /var/www/html/panel_tmp && mv /var/www/html/panel_tmp/panel/* /var/www/html/' . (BASE_URL ? BASE_URL : '') . '/ && rm -rf /var/www/html/panel_tmp panel.zip');
+    echo json_encode(['status' => 'success', 'message' => 'پنل با موفقیت به‌روزرسانی شد!']);
+    exit;
 }
 ?>
-EOF
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>به‌روزرسانی - پخشش کن!</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="assets/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <?php include 'includes/nav.php'; ?>
+    <div class="container mt-4">
+        <h1>به‌روزرسانی پنل</h1>
+        <button id="updateBtn" class="btn btn-primary">به‌روزرسانی از گیت‌هاب</button>
+        <div id="loading" class="d-none mt-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">در حال به‌روزرسانی...</span>
+            </div>
+            <span>در حال به‌روزرسانی...</span>
+        </div>
+        <div id="updateResult" class="mt-3"></div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.getElementById('updateBtn').addEventListener('click', () => {
+            document.getElementById('loading').classList.remove('d-none');
+            fetch('update.php', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('loading').classList.add('d-none');
+                    document.getElementById('updateResult').innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+                })
+                .catch(error => {
+                    document.getElementById('loading').classList.add('d-none');
+                    document.getElementById('updateResult').innerHTML = '<div class="alert alert-danger">خطا در به‌روزرسانی: ' + error + '</div>';
+                });
+        });
+    </script>
+</body>
+</html>
+EOL
 
     # tickets.php
-    cat > "$install_path/tickets.php" <<'EOF'
+    cat > "$install_path/tickets.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -950,11 +966,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message,
         $_SESSION['user_id']
     ]);
-    $db->prepare("INSERT INTO logs (action, username, ip, created_at) VALUES (?, ?, ?, NOW())")->execute([
-        "Ticket created: $title",
-        $_SESSION['username'],
-        $_SERVER['REMOTE_ADDR']
-    ]);
     $success = "تیکت با موفقیت ارسال شد!";
 }
 
@@ -965,7 +976,7 @@ $tickets = $db->query("SELECT * FROM tickets WHERE user_id = {$_SESSION['user_id
 <head>
     <meta charset="UTF-8">
     <title>تیکت‌ها - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
 <body>
@@ -1004,13 +1015,13 @@ $tickets = $db->query("SELECT * FROM tickets WHERE user_id = {$_SESSION['user_id
             </tbody>
         </table>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-EOF
+EOL
 
     # logs.php
-    cat > "$install_path/logs.php" <<'EOF'
+    cat > "$install_path/logs.php" <<'EOL'
 <?php
 session_start();
 require_once 'includes/auth.php';
@@ -1028,7 +1039,7 @@ $logs = $db->query("SELECT * FROM logs ORDER BY created_at DESC LIMIT 100")->fet
 <head>
     <meta charset="UTF-8">
     <title>لاگ‌ها - پخشش کن!</title>
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
 <body>
@@ -1056,13 +1067,13 @@ $logs = $db->query("SELECT * FROM logs ORDER BY created_at DESC LIMIT 100")->fet
             </tbody>
         </table>
     </div>
-    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-EOF
+EOL
 
     # includes/nav.php
-    cat > "$install_path/includes/nav.php" <<'EOF'
+    cat > "$install_path/includes/nav.php" <<'EOL'
 <?php
 $base_url = defined('BASE_URL') ? BASE_URL : '';
 ?>
@@ -1082,15 +1093,16 @@ $base_url = defined('BASE_URL') ? BASE_URL : '';
                 <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/tickets.php">تیکت‌ها</a></li>
                 <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/logs.php">لاگ‌ها</a></li>
                 <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/settings.php">تنظیمات</a></li>
+                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/update.php">به‌روزرسانی</a></li>
             </ul>
             <a href="<?php echo $base_url; ?>/logout.php" class="btn btn-outline-light">خروج</a>
         </div>
     </div>
 </nav>
-EOF
+EOL
 
     # includes/auth.php
-    cat > "$install_path/includes/auth.php" <<'EOF'
+    cat > "$install_path/includes/auth.php" <<'EOL'
 <?php
 require_once 'db.php';
 
@@ -1127,10 +1139,10 @@ function logout() {
     exit;
 }
 ?>
-EOF
+EOL
 
     # includes/db.php
-    cat > "$install_path/includes/db.php" <<'EOF'
+    cat > "$install_path/includes/db.php" <<'EOL'
 <?php
 require_once 'config.php';
 
@@ -1142,10 +1154,10 @@ try {
     die("Connection failed: " . $e->getMessage());
 }
 ?>
-EOF
+EOL
 
     # includes/functions.php
-    cat > "$install_path/includes/functions.php" <<'EOF'
+    cat > "$install_path/includes/functions.php" <<'EOL'
 <?php
 require_once 'db.php';
 require_once 'vendor/autoload.php';
@@ -1167,8 +1179,9 @@ function createUser($username, $traffic_limit, $connection_limit, $days, $group_
     global $db;
     $uuid = uuid();
     $server = selectLoadBalancedServer($group_id);
-    $config = generateV2RayConfig($uuid, $server['ip'], $server['port']);
-    $link = "vless://$uuid@{$server['ip']}:{$server['port']}?security=tls&type=tcp#PakhsheshKon-$username";
+    $iran_ip = $_SERVER['SERVER_ADDR'];
+    $iran_port = file_get_contents('/etc/pakhsheshkon/iran_port.txt');
+    $link = "vless://$uuid@$iran_ip:$iran_port?security=tls&type=tcp#PakhsheshKon-$username";
     
     $qrCode = QrCode::create($link)->setSize(300)->setMargin(10);
     $qrPath = "qrcodes/$username.png";
@@ -1233,25 +1246,11 @@ function getPing($ip) {
 function getServerLoad($serverId) {
     return rand(0, 100); // Replace with real load
 }
-
-function generateV2RayConfig($uuid, $ip, $port) {
-    return [
-        'vnext' => [
-            [
-                'address' => $ip,
-                'port' => $port,
-                'users' => [
-                    ['id' => $uuid, 'alterId' => 0, 'security' => 'auto']
-                ]
-            ]
-        ]
-    ];
-}
 ?>
-EOF
+EOL
 
     # includes/server-key.php
-    cat > "$install_path/includes/server-key.php" <<'EOF'
+    cat > "$install_path/includes/server-key.php" <<'EOL'
 <?php
 function generateServerCode($ip, $port, $name, $secretKey) {
     $data = "$ip|$port|$name";
@@ -1273,10 +1272,23 @@ function decodeServerCode($code, $secretKey) {
     return false;
 }
 ?>
-EOF
+EOL
+
+    # includes/config.php
+接待
+    cat > "$install_path/includes/config.php" <<EOL
+<?php
+define('DB_HOST', 'localhost');
+define('DB_NAME', '$DB_NAME');
+define('DB_USER', '$DB_USER');
+define('DB_PASS', '$DB_PASS');
+define('SECRET_KEY', '$(generate_random_string)');
+define('BASE_URL', '$base_url');
+?>
+EOL
 
     # assets/css/style.css
-    cat > "$install_path/assets/css/style.css" <<'EOF'
+    cat > "$install_path/assets/css/style.css" <<'EOL'
 @font-face {
     font-family: 'IRANSans';
     src: url('../fonts/iransans.ttf') format('truetype');
@@ -1313,16 +1325,12 @@ body {
     color: #fff;
 }
 .dark .card, .dark .table {
-    background: #495057;
-    color: #fff;
+    background: #444;
 }
-#updateProgress {
-    display: none;
-}
-EOF
+EOL
 
     # assets/js/script.js
-    cat > "$install_path/assets/js/script.js" <<'EOF'
+    cat > "$install_path/assets/js/script.js" <<'EOL'
 function testPing(serverId) {
     fetch(`ping.php?server_id=${serverId}`)
         .then(response => response.json())
@@ -1331,27 +1339,6 @@ function testPing(serverId) {
         })
         .catch(error => {
             alert('خطا در تست پینگ: ' + error);
-        });
-}
-
-function updatePanel() {
-    const progressDiv = document.getElementById('updateProgress');
-    progressDiv.style.display = 'block';
-    progressDiv.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">در حال آپدیت...</span></div> در حال آپدیت پنل...';
-    
-    fetch('update.php', { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                progressDiv.innerHTML = '<div class="alert alert-success">پنل با موفقیت آپدیت شد!</div>';
-            } else {
-                progressDiv.innerHTML = '<div class="alert alert-danger">خطا در آپدیت: ' + data.message + '</div>';
-            }
-            setTimeout(() => { progressDiv.style.display = 'none'; }, 3000);
-        })
-        .catch(error => {
-            progressDiv.innerHTML = '<div class="alert alert-danger">خطا: ' + error + '</div>';
-            setTimeout(() => { progressDiv.style.display = 'none'; }, 3000);
         });
 }
 
@@ -1364,27 +1351,86 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('theme', e.target.value);
     });
 });
-EOF
+EOL
 
     # .htaccess
-    cat > "$install_path/.htaccess" <<'EOF'
+    cat > "$install_path/.htaccess" <<'EOL'
 RewriteEngine On
 RewriteBase /<?php echo BASE_URL; ?>/
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]
-EOF
+EOL
 
-    # Download external dependencies
-    show_loading "Downloading dependencies" 99
-    curl -L -o "$install_path/assets/css/bootstrap.min.css" https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css
-    curl -L -o "$install_path/assets/js/bootstrap.bundle.min.js" https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js
-    curl -L -o "$install_path/assets/js/chart.min.js" https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js
-    curl -L -o "$install_path/assets/fonts/iransans.ttf" https://github.com/mahdikbk/pakhshesh-kon/raw/main/fonts/iransans.ttf
+    # Install composer dependencies
+    progress_bar "Installing Composer dependencies"
     composer require endroid/qr-code -d "$install_path"
-    log "Downloaded dependencies"
+    log "Installed Composer dependencies"
+
+    # Create database tables
+    progress_bar "Creating database tables"
+    mysql -u$DB_USER -p$DB_PASS $DB_NAME <<EOF
+CREATE TABLE admins (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    password VARCHAR(255) NOT NULL
+);
+INSERT INTO admins (username, password) VALUES ('$admin_user', '$(php -r "echo password_hash('$admin_pass', PASSWORD_BCRYPT);")');
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    uuid VARCHAR(36) NOT NULL,
+    server_group_id INT NOT NULL,
+    traffic_limit BIGINT NOT NULL,
+    traffic_used BIGINT DEFAULT 0,
+    connection_limit INT NOT NULL,
+    expiry_date DATE NOT NULL,
+    qr_path VARCHAR(255),
+    link TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE server_groups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE servers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    group_id INT NOT NULL,
+    ip VARCHAR(15) NOT NULL,
+    port INT NOT NULL,
+    name VARCHAR(50),
+    unique_code VARCHAR(64) NOT NULL,
+    status ENUM('active', 'inactive') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE monitoring (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    server_id INT NOT NULL,
+    active_users INT,
+    bandwidth VARCHAR(50),
+    ping INT,
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE tickets (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(100) NOT NULL,
+    message TEXT NOT NULL,
+    user_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    action VARCHAR(255) NOT NULL,
+    username VARCHAR(50),
+    ip VARCHAR(45),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+EOF
+    log "Created database tables"
 
     # Configure Apache
+    progress_bar "Configuring Apache"
     cat > /etc/apache2/sites-available/pakhsheshkon.conf <<EOL
 <VirtualHost *:80>
     ServerName $domain
@@ -1425,25 +1471,43 @@ KeepAliveTimeout 5
 EOL
     a2enconf pakhsheshkon-optimize
     systemctl restart apache2
-    log "Configured Apache with optimizations"
+    log "Configured Apache"
 
-    show_loading "Installation complete" 100
-    echo -e "\n${GREEN}Installation completed! Access panel at $protocol://$domain${base_url:+/$base_url}/${NC}"
+    # Save Iran V2Ray port
+    echo "$V2RAY_PORT" > /etc/pakhsheshkon/iran_port.txt
+    log "Saved Iran V2Ray port"
+
+    # Configure firewall
+    progress_bar "Configuring firewall"
+    ufw allow 80,443,$V2RAY_PORT/tcp
+    ufw --force enable
+    log "Configured firewall"
+
+    # Set permissions
+    progress_bar "Setting permissions"
+    chown -R www-data:www-data "$install_path"
+    chmod -R 755 "$install_path"
+    log "Set file permissions"
+
+    echo -e "${GREEN}Installation completed! Access panel at $protocol://$domain${base_url:+/$base_url}/${NC}"
     echo -e "${GREEN}Admin Username: $admin_user${NC}"
     echo -e "${GREEN}Admin Password: [Your chosen password]${NC}"
     log "Iran server installation completed"
 
 else
-    show_loading "Installing dependencies" 40
+    # Install dependencies for abroad server
+    progress_bar "Installing dependencies"
     apt install -y curl unzip ufw vnstat jq
     log "Installed dependencies for abroad server"
 
-    show_loading "Getting server name" 50
+    # Get server name
+    progress_bar "Getting server name"
     echo -e "${YELLOW}Enter a name for this server (e.g., Finland-1):${NC}"
     read -p "Server Name: " server_name
     log "Server name: $server_name"
 
-    show_loading "Generating V2Ray port" 60
+    # Generate random port
+    progress_bar "Generating V2Ray port"
     V2RAY_PORT=$((RANDOM % 50000 + 10000))
     while netstat -tuln | grep -q ":$V2RAY_PORT"; do
         V2RAY_PORT=$((RANDOM % 50000 + 10000))
@@ -1451,11 +1515,13 @@ else
     echo -e "${YELLOW}Generated V2Ray port: $V2RAY_PORT${NC}"
     log "Generated V2Ray port: $V2RAY_PORT"
 
-    show_loading "Installing V2Ray" 70
+    # Install V2Ray
+    progress_bar "Installing V2Ray"
     bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh)
     log "Installed V2Ray"
 
-    show_loading "Generating server code" 80
+    # Generate encrypted server code
+    progress_bar "Generating server code"
     SERVER_IP=$(curl -s ifconfig.me)
     SECRET_KEY=$(generate_random_string)
     SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name")
@@ -1463,7 +1529,8 @@ else
     echo -e "${GREEN}Encrypted Server Code: $UNIQUE_CODE${NC}"
     log "Generated server code: $UNIQUE_CODE"
 
-    show_loading "Saving server config" 85
+    # Save server config
+    progress_bar "Saving server config"
     mkdir -p /etc/pakhsheshkon
     cat > /etc/pakhsheshkon/server.conf <<EOL
 SERVER_IP=$SERVER_IP
@@ -1475,7 +1542,8 @@ EOL
     chmod 600 /etc/pakhsheshkon/server.conf
     log "Saved server config"
 
-    show_loading "Configuring V2Ray" 90
+    # Configure V2Ray
+    progress_bar "Configuring V2Ray"
     cat > /usr/local/etc/v2ray/config.json <<EOL
 {
   "inbounds": [
@@ -1518,9 +1586,6 @@ EOL
   ]
 }
 EOL
-    log "Configured V2Ray"
-
-    show_loading "Setting up TLS for V2Ray" 92
     if certbot certonly --standalone -d "$SERVER_IP" --non-interactive --agree-tos --email admin@$SERVER_IP; then
         echo -e "${GREEN}TLS certificate installed for V2Ray.${NC}"
         log "TLS installed for V2Ray"
@@ -1531,8 +1596,10 @@ EOL
         mv /etc/pakhsheshkon/v2ray.key /etc/letsencrypt/live/$SERVER_IP/privkey.pem
         log "Generated self-signed certificate for V2Ray"
     fi
+    log "Configured V2Ray"
 
-    show_loading "Optimizing network" 94
+    # Optimize network
+    progress_bar "Optimizing network"
     sysctl -w net.core.rmem_max=8388608
     sysctl -w net.core.wmem_max=8388608
     sysctl -w net.ipv4.tcp_congestion_control=bbr
@@ -1542,7 +1609,8 @@ EOL
     sysctl -p
     log "Optimized network settings"
 
-    show_loading "Securing SSH" 96
+    # Secure SSH
+    progress_bar "Securing SSH"
     SSH_PORT=$((RANDOM % 50000 + 10000))
     sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
     sed -i "s/PermitRootLogin yes/PermitRootLogin no/" /etc/ssh/sshd_config
@@ -1550,12 +1618,14 @@ EOL
     echo -e "${GREEN}SSH port changed to $SSH_PORT. Root login disabled.${NC}"
     log "Secured SSH with port $SSH_PORT"
 
-    show_loading "Configuring firewall" 98
+    # Configure firewall
+    progress_bar "Configuring firewall"
     ufw allow 80,443,$V2RAY_PORT,$((V2RAY_PORT+1)),$SSH_PORT/tcp
     ufw --force enable
     log "Configured firewall"
 
-    show_loading "Setting up monitoring" 99
+    # Setup monitoring
+    progress_bar "Setting up monitoring"
     curl -L -o /usr/local/bin/monitor.sh https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/scripts/monitor.sh
     chmod +x /usr/local/bin/monitor.sh
     cat > /etc/systemd/system/pakhsheshkon-monitor.service <<EOL
@@ -1574,23 +1644,36 @@ EOL
     systemctl start pakhsheshkon-monitor v2ray
     log "Configured monitoring"
 
-    show_loading "Checking ping to Iran" 100
-    IRAN_IP=$(dig +short iran.pakhsheshkon.com || echo "1.1.1.1")
-    PING=$(ping -c 4 $IRAN_IP | awk '/rtt/ {print $4}' | cut -d'/' -f2)
+# Check ping to Iran
+    progress_bar "Checking ping to Iran"
+    IRAN_IP=$(dig @8.8.8.8 +short iran.pakhsheshkon.com || echo "1.1.1.1")
+    PING=$(ping -c 4 $IRAN_IP | awk '/rtt/ {print $4}' | cut -d'/' -f2 2>/dev/null)
     if [[ -n "$PING" && $(echo "$PING > 200" | bc -l) -eq 1 ]]; then
         echo -e "${YELLOW}Warning: High ping to Iran ($PING ms). Performance may be affected.${NC}"
         log "High ping to Iran: $PING ms"
-    else
+    elif [[ -n "$PING" ]]; then
         echo -e "${GREEN}Ping to Iran: $PING ms${NC}"
         log "Ping to Iran: $PING ms"
+    else
+        echo -e "${YELLOW}Unable to ping Iran server. Check network connectivity.${NC}"
+        log "Ping to Iran failed"
     fi
 
+    # Finalize installation
     echo -e "${GREEN}Abroad server setup completed!${NC}"
     echo -e "${GREEN}Server Name: $server_name${NC}"
     echo -e "${GREEN}V2Ray Port: $V2RAY_PORT${NC}"
+    echo -e "${GREEN}SSH Port: $SSH_PORT${NC}"
     echo -e "${GREEN}Use this encrypted code in Iran panel: $UNIQUE_CODE${NC}"
     log "Abroad server installation completed"
 fi
 
-echo -e "${GREEN}Setup finished!${NC}"
+# Final message
+progress_bar "Finalizing setup"
+echo -e "${GREEN}Setup finished successfully!${NC}"
+if [[ "$server_location" == "iran" ]]; then
+    echo -e "${CYAN}Access your panel at: $protocol://$domain${base_url:+/$base_url}/${NC}"
+    echo -e "${CYAN}V2Ray is running on port: $V2RAY_PORT${NC}"
+fi
 log "Setup finished"
+EOL
