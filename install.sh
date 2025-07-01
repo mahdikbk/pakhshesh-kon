@@ -6,6 +6,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # ASCII Art for PAKHSHESH KON
@@ -18,6 +19,9 @@ LOGO=$(cat << 'EOF'
    (_)   `\__,_)(_) (_)(_) (_)(____/(_) (_)`\____)(____/(_) (_)   (_) (_)`\___/'(_) (_)
 EOF
 )
+
+# Powered By text
+POWERED_BY="Powered By MahdiKBK"
 
 # Animation function
 animate_logo() {
@@ -32,10 +36,17 @@ animate_logo() {
     for color in RED GREEN YELLOW BLUE CYAN; do
         clear
         echo -e "${!color}${LOGO}${NC}"
+        echo -e "${MAGENTA}${POWERED_BY}${NC}"
         sleep 0.2
     done
     clear
     echo -e "${GREEN}${LOGO}${NC}"
+    # Gradient effect for Powered By
+    for ((i=0; i<${#POWERED_BY}; i++)); do
+        printf "\033[38;5;$((i*10+160))m${POWERED_BY:$i:1}"
+    done
+    echo -e "${NC}"
+    sleep 1
 }
 
 # Generate random string
@@ -45,8 +56,8 @@ generate_random_string() {
 
 # Detect server country
 detect_country() {
-    COUNTRY=$(curl -s https://ipinfo.io/country)
-    if [[ -z "$COUNTRY" ]]; then
+    COUNTRY=$(curl -s http://ip-api.com/json | jq -r '.country')
+    if [[ -z "$COUNTRY" || "$COUNTRY" == "null" ]]; then
         COUNTRY="Unknown"
     fi
     echo "$COUNTRY"
@@ -119,7 +130,7 @@ apt update && apt upgrade -y
 if [[ "$server_location" == "iran" ]]; then
     # Install dependencies
     echo -e "${YELLOW}Installing Apache, PHP, MariaDB, Certbot, and dependencies...${NC}"
-    apt install -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer certbot python3-certbot-apache
+    apt install -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer certbot python3-certbot-apache jq
 
     # Start and enable services
     systemctl enable apache2 mariadb
@@ -302,7 +313,7 @@ EOL
 else
     # Install dependencies for abroad server
     echo -e "${YELLOW}Installing V2Ray and dependencies...${NC}"
-    apt install -y curl unzip ufw vnstat
+    apt install -y curl unzip ufw vnstat jq
 
     # Get server name
     echo -e "${YELLOW}Enter a name for this server (e.g., Finland-1):${NC}"
