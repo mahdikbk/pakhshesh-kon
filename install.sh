@@ -20,8 +20,14 @@ LOGO=$(cat << 'EOF'
 EOF
 )
 
-# Powered By text
-POWERED_BY="Powered By MahdiKBK"
+# ASCII Art for Powered By MahdiKBK
+POWERED_BY=$(cat << 'EOF'
+   _                            _                               _     
+  |_) _        _  ._ _   _|    |_)       |\/|  _. |_   _| o |/ |_) |/ 
+  |  (_) \/\/ (/_ | (/_ (_|    |_) \/    |  | (_| | | (_| | |\ |_) |\ 
+                                   /                                  
+EOF
+)
 
 # Animation function
 animate_logo() {
@@ -32,18 +38,20 @@ animate_logo() {
         sleep 0.005
     done
     echo -e "${NC}"
+    echo -e "${MAGENTA}${POWERED_BY}${NC}"
     sleep 1
     for color in RED GREEN YELLOW BLUE CYAN; do
         clear
         echo -e "${!color}${LOGO}${NC}"
-        echo -e "${MAGENTA}${POWERED_BY}${NC}"
+        echo -e "${!color}${POWERED_BY}${NC}"
         sleep 0.2
     done
     clear
     echo -e "${GREEN}${LOGO}${NC}"
+    echo -e "${NC}"
     # Gradient effect for Powered By
     for ((i=0; i<${#POWERED_BY}; i++)); do
-        printf "\033[38;5;$((i*10+160))m${POWERED_BY:$i:1}"
+        printf "\033[38;5;$((i*5+160))m${POWERED_BY:$i:1}"
     done
     echo -e "${NC}"
     sleep 1
@@ -54,13 +62,17 @@ generate_random_string() {
     openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16
 }
 
-# Detect server country
-detect_country() {
-    COUNTRY=$(curl -s http://ip-api.com/json | jq -r '.country')
+# Detect server location
+detect_location() {
+    RESPONSE=$(curl -s http://ip-api.com/json)
+    COUNTRY=$(echo "$RESPONSE" | jq -r '.country')
+    CITY=$(echo "$RESPONSE" | jq -r '.city')
+    ISP=$(echo "$RESPONSE" | jq -r '.isp')
     if [[ -z "$COUNTRY" || "$COUNTRY" == "null" ]]; then
-        COUNTRY="Unknown"
+        echo "Unable to detect location"
+    else
+        echo "$COUNTRY, $CITY, $ISP"
     fi
-    echo "$COUNTRY"
 }
 
 # Check domain resolves to server IP
@@ -78,8 +90,8 @@ check_domain() {
 # Main menu
 animate_logo
 echo -e "${YELLOW}Welcome to Pakhshesh Kon!${NC}"
-SERVER_COUNTRY=$(detect_country)
-echo -e "${CYAN}Detected server location: $SERVER_COUNTRY${NC}"
+SERVER_LOCATION=$(detect_location)
+echo -e "${CYAN}Detected server location: $SERVER_LOCATION${NC}"
 echo -e "${CYAN}Choose an option:${NC}"
 echo -e "1) Install Pakhshesh Kon"
 echo -e "2) Uninstall Pakhshesh Kon"
@@ -97,7 +109,7 @@ if [[ "$choice" == "2" ]]; then
     if [[ -n "$DB_NAME" ]]; then
         mysql -e "DROP DATABASE $DB_NAME;"
     fi
-    apt purge -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache
+    apt purge -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache jq
     apt autoremove -y
     ufw reset --force
     ufw enable
