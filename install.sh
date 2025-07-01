@@ -63,10 +63,17 @@ generate_random_string() {
 
 # Detect server location
 detect_location() {
+    apt-get install -y jq >/dev/null 2>&1
     RESPONSE=$(curl -s http://ip-api.com/json)
-    COUNTRY=$(echo "$RESPONSE" | jq -r '.country')
-    CITY=$(echo "$RESPONSE" | jq -r '.city')
-    ISP=$(echo "$RESPONSE" | jq -r '.isp')
+    if command -v jq >/dev/null 2>&1; then
+        COUNTRY=$(echo "$RESPONSE" | jq -r '.country')
+        CITY=$(echo "$RESPONSE" | jq -r '.city')
+        ISP=$(echo "$RESPONSE" | jq -r '.isp')
+    else
+        COUNTRY=$(echo "$RESPONSE" | grep -oP '"country":"[^"]+"' | cut -d'"' -f4)
+        CITY=$(echo "$RESPONSE" | grep -oP '"city":"[^"]+"' | cut -d'"' -f4)
+        ISP=$(echo "$RESPONSE" | grep -oP '"isp":"[^"]+"' | cut -d'"' -f4)
+    fi
     if [[ -z "$COUNTRY" || "$COUNTRY" == "null" ]]; then
         echo "Unable to detect location"
     else
@@ -111,10 +118,10 @@ log() {
 progress_bar() {
     echo -e "${YELLOW}$1 [          ]${NC}\r"
     for i in {1..10}; do
-        echo -ne "${YELLOW}$1 [${GREEN}$(printf '%*s' $i | tr ' ' '#') $(printf '%*s' $((10-i)) )${YELLOW}]${NC}\r"
+        echo -ne "${YELLOW}$1 [${GREEN}$(printf '%*s' $i | tr ' ' '#') $(printf '%*s' $((10-i)) )${YELLOW}] ${i}0%${NC}\r"
         sleep 0.5
     done
-    echo -e "${YELLOW}$1 [${GREEN}########## OK${YELLOW}]${NC}"
+    echo -e "${YELLOW}$1 [${GREEN}########## OK${YELLOW}] 100%${NC}"
 }
 
 # Main menu
@@ -175,7 +182,7 @@ fi
 progress_bar "Updating system"
 log "Updating system"
 apt update && apt upgrade -y
-apt install -y curl jq unzip ntp apache2 php php-mysql mariadb-server libapache2-mod-php composer certbot python3-certbot-apache jq glances
+apt install -y curl jq unzip ntp apache2 php php-mysql mariadb-server libapache2-mod-php composer certbot python3-certbot-apache glances
 ntpdate pool.ntp.org
 log "System updated and NTP synchronized"
 
@@ -239,9 +246,8 @@ EOL
         log "TLS installed for V2Ray"
     else
         echo -e "${YELLOW}Using self-signed certificate for V2Ray...${NC}"
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/pakhsheshkon/v2ray.key -out /etc/pakhsheshkon/v2ray.crt -subj "/CN=$SERVER_IP"
-        mv /etc/pakhsheshkon/v2ray.crt /etc/letsencrypt/live/$SERVER_IP/fullchain.pem
-        mv /etc/pakhsheshkon/v2ray.key /etc/letsencrypt/live/$SERVER_IP/privkey.pem
+        mkdir -p /etc/letsencrypt/live/$SERVER_IP
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/letsencrypt/live/$SERVER_IP/privkey.pem -out /etc/letsencrypt/live/$SERVER_IP/fullchain.pem -subj "/CN=$SERVER_IP"
         log "Generated self-signed certificate for V2Ray"
     fi
     systemctl enable v2ray
@@ -1274,19 +1280,6 @@ function decodeServerCode($code, $secretKey) {
 ?>
 EOL
 
-    # includes/config.php
-接待
-    cat > "$install_path/includes/config.php" <<EOL
-<?php
-define('DB_HOST', 'localhost');
-define('DB_NAME', '$DB_NAME');
-define('DB_USER', '$DB_USER');
-define('DB_PASS', '$DB_PASS');
-define('SECRET_KEY', '$(generate_random_string)');
-define('BASE_URL', '$base_url');
-?>
-EOL
-
     # assets/css/style.css
     cat > "$install_path/assets/css/style.css" <<'EOL'
 @font-face {
@@ -1474,6 +1467,7 @@ EOL
     log "Configured Apache"
 
     # Save Iran V2Ray port
+    progress_bar "Saving Iran V2Ray port"
     echo "$V2RAY_PORT" > /etc/pakhsheshkon/iran_port.txt
     log "Saved Iran V2Ray port"
 
@@ -1487,11 +1481,18 @@ EOL
     progress_bar "Setting permissions"
     chown -R www-data:www-data "$install_path"
     chmod -R 755 "$install_path"
+    chmod 777 "$install_path/qrcodes"
     log "Set file permissions"
+
+    # Download IranSans font
+    progress_bar "Downloading IranSans font"
+    curl -L -o "$install_path/assets/fonts/iransans.ttf" https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/assets/fonts/iransans.ttf
+    log "Downloaded IranSans font"
 
     echo -e "${GREEN}Installation completed! Access panel at $protocol://$domain${base_url:+/$base_url}/${NC}"
     echo -e "${GREEN}Admin Username: $admin_user${NC}"
     echo -e "${GREEN}Admin Password: [Your chosen password]${NC}"
+    echo -e "${GREEN}V2Ray is running on port: $V2RAY_PORT${NC}"
     log "Iran server installation completed"
 
 else
@@ -1591,9 +1592,8 @@ EOL
         log "TLS installed for V2Ray"
     else
         echo -e "${YELLOW}Using self-signed certificate for V2Ray...${NC}"
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/pakhsheshkon/v2ray.key -out /etc/pakhsheshkon/v2ray.crt -subj "/CN=$SERVER_IP"
-        mv /etc/pakhsheshkon/v2ray.crt /etc/letsencrypt/live/$SERVER_IP/fullchain.pem
-        mv /etc/pakhsheshkon/v2ray.key /etc/letsencrypt/live/$SERVER_IP/privkey.pem
+        mkdir -p /etc/letsencrypt/live/$SERVER_IP
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/letsencrypt/live/$SERVER_IP/privkey.pem -out /etc/letsencrypt/live/$SERVER_IP/fullchain.pem -subj "/CN=$SERVER_IP"
         log "Generated self-signed certificate for V2Ray"
     fi
     log "Configured V2Ray"
@@ -1644,7 +1644,7 @@ EOL
     systemctl start pakhsheshkon-monitor v2ray
     log "Configured monitoring"
 
-# Check ping to Iran
+    # Check ping to Iran
     progress_bar "Checking ping to Iran"
     IRAN_IP=$(dig @8.8.8.8 +short iran.pakhsheshkon.com || echo "1.1.1.1")
     PING=$(ping -c 4 $IRAN_IP | awk '/rtt/ {print $4}' | cut -d'/' -f2 2>/dev/null)
@@ -1659,7 +1659,7 @@ EOL
         log "Ping to Iran failed"
     fi
 
-    # Finalize installation
+    # Final message for abroad server
     echo -e "${GREEN}Abroad server setup completed!${NC}"
     echo -e "${GREEN}Server Name: $server_name${NC}"
     echo -e "${GREEN}V2Ray Port: $V2RAY_PORT${NC}"
@@ -1674,6 +1674,43 @@ echo -e "${GREEN}Setup finished successfully!${NC}"
 if [[ "$server_location" == "iran" ]]; then
     echo -e "${CYAN}Access your panel at: $protocol://$domain${base_url:+/$base_url}/${NC}"
     echo -e "${CYAN}V2Ray is running on port: $V2RAY_PORT${NC}"
+    echo -e "${CYAN}Admin Username: $admin_user${NC}"
+    echo -e "${CYAN}Admin Password: [Your chosen password]${NC}"
+else
+    echo -e "${CYAN}Server Name: $server_name${NC}"
+    echo -e "${CYAN}V2Ray Port: $V2RAY_PORT${NC}"
+    echo -e "${CYAN}SSH Port: $SSH_PORT${NC}"
+    echo -e "${CYAN}Encrypted Server Code: $UNIQUE_CODE${NC}"
+    echo -e "${CYAN}Use this code in the Iran panel to register the server.${NC}"
 fi
 log "Setup finished"
+
+# Save installation summary
+progress_bar "Saving installation summary"
+cat > /var/log/pakhsheshkon_install_summary.txt <<EOL
+Pakhshesh Kon Installation Summary
+---------------------------------
+Date: $(date '+%Y-%m-%d %H:%M:%S')
+Server Location: $server_location
+Server IP: $SERVER_IP
+Detected Location: $SERVER_LOCATION
+
+$(if [[ "$server_location" == "iran" ]]; then
+    echo "Panel URL: $protocol://$domain${base_url:+/$base_url}/"
+    echo "V2Ray Port: $V2RAY_PORT"
+    echo "Admin Username: $admin_user"
+    echo "Database Name: $DB_NAME"
+    echo "Database User: $DB_USER"
+else
+    echo "Server Name: $server_name"
+    echo "V2Ray Port: $V2RAY_PORT"
+    echo "SSH Port: $SSH_PORT"
+    echo "Encrypted Server Code: $UNIQUE_CODE"
+fi)
+---------------------------------
 EOL
+log "Saved installation summary to /var/log/pakhsheshkon_install_summary.txt"
+
+# Notify user to check logs
+echo -e "${YELLOW}Installation logs and summary saved in /var/log/pakhsheshkon.log and /var/log/pakhsheshkon_install_summary.txt${NC}"
+echo -e "${GREEN}Thank you for using Pakhshesh Kon by MahdiKBK!${NC}"
