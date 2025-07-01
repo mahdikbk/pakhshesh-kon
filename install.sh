@@ -81,11 +81,21 @@ detect_location() {
     fi
 }
 
+# Get server IP
+get_server_ip() {
+    SERVER_IP=$(curl -s https://api.ipify.org || curl -s http://ip.me)
+    if [[ -z "$SERVER_IP" ]]; then
+        echo -e "${RED}Failed to detect server IP. Please enter manually:${NC}"
+        read -p "Server IP: " SERVER_IP
+    fi
+    echo "$SERVER_IP"
+}
+
 # Check domain resolves to server IP
 check_domain() {
     DOMAIN=$1
-    SERVER_IP=$(curl -s ifconfig.me)
-    RESOLVED_IP=$(dig @8.8.8.8 +short $DOMAIN | tail -n 1)
+    SERVER_IP=$(get_server_ip)
+    RESOLVED_IP=$(dig @8.8.8.8 +short $DOMAIN | tail -n 1 || dig @1.1.1.1 +short $DOMAIN | tail -n 1)
     if [[ "$RESOLVED_IP" == "$SERVER_IP" ]]; then
         return 0
     else
@@ -95,7 +105,7 @@ check_domain() {
 
 # Check server health
 check_server_health() {
-    echo -e "${YELLOW}Checking server health...${NC}"
+    progress_bar "Checking server health"
     CPU=$(grep -c processor /proc/cpuinfo)
     RAM=$(free -m | awk '/Mem:/ {print $2}')
     DISK=$(df -h / | awk 'NR==2 {print $4}' | tr -d 'G')
@@ -107,6 +117,7 @@ check_server_health() {
         fi
     fi
     echo -e "${GREEN}Server health OK${NC}"
+    log "Server health checked"
 }
 
 # Log function
@@ -148,7 +159,7 @@ if [[ "$choice" == "2" ]]; then
         mysql -e "DROP DATABASE $DB_NAME;"
         log "Dropped database $DB_NAME"
     fi
-    apt purge -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache jq glances
+    apt purge -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache jq glances net-tools ntpdate
     apt autoremove -y
     ufw reset --force
     ufw enable
@@ -182,13 +193,12 @@ fi
 progress_bar "Updating system"
 log "Updating system"
 apt update && apt upgrade -y
-apt install -y curl jq unzip ntp apache2 php php-mysql mariadb-server libapache2-mod-php composer certbot python3-certbot-apache glances
-ntpdate pool.ntp.org
-log "System updated and NTP synchronized"
+apt install -y curl jq unzip ntpdate net-tools apache2 php php-mysql mariadb-server libapache2-mod-php composer certbot python3-certbot-apache glances bc
+systemctl restart systemd-timesyncd
+log "System updated and time synchronized"
 
 # Check server health
 check_server_health
-log "Server health checked"
 
 # Backup initial config
 progress_bar "Creating initial backup"
@@ -197,9 +207,24 @@ tar -czf /var/backups/pakhsheshkon/initial_backup_$(date +%F).tar.gz /etc 2>/dev
 log "Initial backup created"
 
 if [[ "$server_location" == "iran" ]]; then
-    # Install V2Ray for Iran server
+    # Ensure MariaDB is running
+    progress_bar "Starting MariaDB"
+    systemctl start mariadb
+    systemctl enable mariadb
+    if ! systemctl is-active --quiet mariadb; then
+        echo -e "${RED}MariaDB failed to start. Check logs in /var/log/mysql/.${NC}"
+        log "MariaDB failed to start"
+        exit 1
+    fi
+    log "MariaDB started"
+
+    # Install V2Ray
     progress_bar "Installing V2Ray"
-    bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh)
+    bash <(curl -L https://raw.githubusercontent.com/v2fly/v2ray-core/master/release/install-release.sh) || {
+        echo -e "${RED}Failed to install V2Ray. Check network or repository.${NC}"
+        log "V2Ray installation failed"
+        exit 1
+    }
     V2RAY_PORT=$((RANDOM % 50000 + 10000))
     while netstat -tuln | grep -q ":$V2RAY_PORT"; do
         V2RAY_PORT=$((RANDOM % 50000 + 10000))
@@ -209,7 +234,8 @@ if [[ "$server_location" == "iran" ]]; then
 
     # Configure V2Ray
     progress_bar "Configuring V2Ray"
-    SERVER_IP=$(curl -s ifconfig.me)
+    SERVER_IP=$(get_server_ip)
+    mkdir -p /usr/local/etc/v2ray
     cat > /usr/local/etc/v2ray/config.json <<EOL
 {
   "inbounds": [
@@ -226,8 +252,8 @@ if [[ "$server_location" == "iran" ]]; then
         "tlsSettings": {
           "certificates": [
             {
-              "certificateFile": "/etc/letsencrypt/live/$SERVER_IP/fullchain.pem",
-              "keyFile": "/etc/letsencrypt/live/$SERVER_IP/privkey.pem"
+              "certificateFile": "/etc/letsencrypt/live/$domain/fullchain.pem",
+              "keyFile": "/etc/letsencrypt/live/$domain/privkey.pem"
             }
           ]
         }
@@ -241,18 +267,30 @@ if [[ "$server_location" == "iran" ]]; then
   ]
 }
 EOL
-    if certbot certonly --standalone -d "$SERVER_IP" --non-interactive --agree-tos --email admin@$SERVER_IP; then
+    if certbot certonly --standalone -d "$domain" --non-interactive --agree-tos --email admin@$domain; then
         echo -e "${GREEN}TLS certificate installed for V2Ray.${NC}"
         log "TLS installed for V2Ray"
     else
         echo -e "${YELLOW}Using self-signed certificate for V2Ray...${NC}"
-        mkdir -p /etc/letsencrypt/live/$SERVER_IP
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/letsencrypt/live/$SERVER_IP/privkey.pem -out /etc/letsencrypt/live/$SERVER_IP/fullchain.pem -subj "/CN=$SERVER_IP"
+        mkdir -p /etc/letsencrypt/live/$domain
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/letsencrypt/live/$domain/privkey.pem -out /etc/letsencrypt/live/$domain/fullchain.pem -subj "/CN=$domain" 2>/dev/null
         log "Generated self-signed certificate for V2Ray"
     fi
     systemctl enable v2ray
     systemctl start v2ray
+    if ! systemctl is-active --quiet v2ray; then
+        echo -e "${RED}V2Ray service failed to start. Check logs in /usr/local/etc/v2ray/.${NC}"
+        log "V2Ray service failed to start"
+        exit 1
+    fi
     log "V2Ray configured"
+
+    # Save Iran V2Ray port
+    progress_bar "Saving Iran V2Ray port"
+    mkdir -p /etc/pakhsheshkon
+    echo "$V2RAY_PORT" > /etc/pakhsheshkon/iran_port.txt
+    chmod 600 /etc/pakhsheshkon/iran_port.txt
+    log "Saved Iran V2Ray port"
 
     # Secure MariaDB
     progress_bar "Securing MariaDB"
@@ -271,7 +309,11 @@ EOF
     DB_NAME="pk_$(generate_random_string)"
     DB_USER="pkuser_$(generate_random_string)"
     DB_PASS=$(generate_random_string)
-    mysql -e "CREATE DATABASE $DB_NAME;"
+    mysql -e "CREATE DATABASE $DB_NAME;" || {
+        echo -e "${RED}Failed to create database. Check MariaDB status.${NC}"
+        log "Database creation failed"
+        exit 1
+    }
     mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
     mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
     mysql -e "FLUSH PRIVILEGES;"
@@ -1185,9 +1227,8 @@ function createUser($username, $traffic_limit, $connection_limit, $days, $group_
     global $db;
     $uuid = uuid();
     $server = selectLoadBalancedServer($group_id);
-    $iran_ip = $_SERVER['SERVER_ADDR'];
     $iran_port = file_get_contents('/etc/pakhsheshkon/iran_port.txt');
-    $link = "vless://$uuid@$iran_ip:$iran_port?security=tls&type=tcp#PakhsheshKon-$username";
+    $link = "vless://$uuid@$server[ip]:$iran_port?security=tls&type=tcp#PakhsheshKon-$username";
     
     $qrCode = QrCode::create($link)->setSize(300)->setMargin(10);
     $qrPath = "qrcodes/$username.png";
@@ -1246,7 +1287,8 @@ function uuid() {
 }
 
 function getPing($ip) {
-    return rand(10, 100); // Replace with real ping
+    $ping = shell_exec("ping -c 4 $ip | awk '/rtt/ {print \$4}' | cut -d'/' -f2");
+    return $ping ? (int)$ping : 100;
 }
 
 function getServerLoad($serverId) {
@@ -1277,6 +1319,18 @@ function decodeServerCode($code, $secretKey) {
     }
     return false;
 }
+?>
+EOL
+
+    # includes/config.php
+    cat > "$install_path/includes/config.php" <<EOL
+<?php
+define('DB_HOST', 'localhost');
+define('DB_NAME', '$DB_NAME');
+define('DB_USER', '$DB_USER');
+define('DB_PASS', '$DB_PASS');
+define('SECRET_KEY', '$(generate_random_string)');
+define('BASE_URL', '$base_url');
 ?>
 EOL
 
@@ -1468,7 +1522,9 @@ EOL
 
     # Save Iran V2Ray port
     progress_bar "Saving Iran V2Ray port"
+    mkdir -p /etc/pakhsheshkon
     echo "$V2RAY_PORT" > /etc/pakhsheshkon/iran_port.txt
+    chmod 600 /etc/pakhsheshkon/iran_port.txt
     log "Saved Iran V2Ray port"
 
     # Configure firewall
@@ -1486,19 +1542,25 @@ EOL
 
     # Download IranSans font
     progress_bar "Downloading IranSans font"
-    curl -L -o "$install_path/assets/fonts/iransans.ttf" https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/assets/fonts/iransans.ttf
+    curl -L -o "$install_path/assets/fonts/iransans.ttf" https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/assets/fonts/iransans.ttf || {
+        echo -e "${YELLOW}Failed to download IranSans font. Using default font.${NC}"
+        log "Failed to download IranSans font"
+    }
     log "Downloaded IranSans font"
 
-    echo -e "${GREEN}Installation completed! Access panel at $protocol://$domain${base_url:+/$base_url}/${NC}"
-    echo -e "${GREEN}Admin Username: $admin_user${NC}"
-    echo -e "${GREEN}Admin Password: [Your chosen password]${NC}"
-    echo -e "${GREEN}V2Ray is running on port: $V2RAY_PORT${NC}"
+    # Final message
+    progress_bar "Finalizing setup"
+    echo -e "${GREEN}Setup finished successfully!${NC}"
+    echo -e "${CYAN}Access your panel at: $protocol://$domain${base_url:+/$base_url}/${NC}"
+    echo -e "${CYAN}V2Ray is running on port: $V2RAY_PORT${NC}"
+    echo -e "${CYAN}Admin Username: $admin_user${NC}"
+    echo -e "${CYAN}Admin Password: [Your chosen password]${NC}"
     log "Iran server installation completed"
 
 else
     # Install dependencies for abroad server
     progress_bar "Installing dependencies"
-    apt install -y curl unzip ufw vnstat jq
+    apt install -y curl unzip ufw vnstat jq net-tools ntpdate bc
     log "Installed dependencies for abroad server"
 
     # Get server name
@@ -1518,12 +1580,16 @@ else
 
     # Install V2Ray
     progress_bar "Installing V2Ray"
-    bash <(curl -L https://github.com/v2fly/v2ray-core/releases/latest/download/install-release.sh)
+    bash <(curl -L https://raw.githubusercontent.com/v2fly/v2ray-core/master/release/install-release.sh) || {
+        echo -e "${RED}Failed to install V2Ray. Check network or repository.${NC}"
+        log "V2Ray installation failed"
+        exit 1
+    }
     log "Installed V2Ray"
 
     # Generate encrypted server code
     progress_bar "Generating server code"
-    SERVER_IP=$(curl -s ifconfig.me)
+    SERVER_IP=$(get_server_ip)
     SECRET_KEY=$(generate_random_string)
     SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name")
     UNIQUE_CODE=$(echo -n "$SERVER_DATA" | openssl dgst -sha256 -hmac "$SECRET_KEY" | head -c 64)
@@ -1543,8 +1609,9 @@ EOL
     chmod 600 /etc/pakhsheshkon/server.conf
     log "Saved server config"
 
-    # Configure V2Ray
+# Configure V2Ray
     progress_bar "Configuring V2Ray"
+    mkdir -p /usr/local/etc/v2ray
     cat > /usr/local/etc/v2ray/config.json <<EOL
 {
   "inbounds": [
@@ -1593,10 +1660,17 @@ EOL
     else
         echo -e "${YELLOW}Using self-signed certificate for V2Ray...${NC}"
         mkdir -p /etc/letsencrypt/live/$SERVER_IP
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/letsencrypt/live/$SERVER_IP/privkey.pem -out /etc/letsencrypt/live/$SERVER_IP/fullchain.pem -subj "/CN=$SERVER_IP"
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/letsencrypt/live/$SERVER_IP/privkey.pem -out /etc/letsencrypt/live/$SERVER_IP/fullchain.pem -subj "/CN=$SERVER_IP" 2>/dev/null
         log "Generated self-signed certificate for V2Ray"
     fi
-    log "Configured V2Ray"
+    systemctl enable v2ray
+    systemctl start v2ray
+    if ! systemctl is-active --quiet v2ray; then
+        echo -e "${RED}V2Ray service failed to start. Check logs in /usr/local/etc/v2ray/.${NC}"
+        log "V2Ray service failed to start"
+        exit 1
+    fi
+    log "V2Ray configured"
 
     # Optimize network
     progress_bar "Optimizing network"
@@ -1626,7 +1700,17 @@ EOL
 
     # Setup monitoring
     progress_bar "Setting up monitoring"
-    curl -L -o /usr/local/bin/monitor.sh https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/scripts/monitor.sh
+    cat > /usr/local/bin/monitor.sh <<'EOL'
+#!/bin/bash
+source /etc/pakhsheshkon/server.conf
+while true; do
+    active_users=$(ss -t | grep ESTAB | wc -l)
+    bandwidth=$(vnstat --oneline | cut -d';' -f11)
+    ping=$(ping -c 4 $IRAN_IP | awk '/rtt/ {print $4}' | cut -d'/' -f2)
+    curl -X POST -d "server_code=$UNIQUE_CODE&users=$active_users&bandwidth=$bandwidth&ping=$ping" http://iran.pakhsheshkon.com/monitor.php
+    sleep 300
+done
+EOL
     chmod +x /usr/local/bin/monitor.sh
     cat > /etc/systemd/system/pakhsheshkon-monitor.service <<EOL
 [Unit]
@@ -1640,8 +1724,8 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOL
-    systemctl enable pakhsheshkon-monitor v2ray
-    systemctl start pakhsheshkon-monitor v2ray
+    systemctl enable pakhsheshkon-monitor
+    systemctl start pakhsheshkon-monitor
     log "Configured monitoring"
 
     # Check ping to Iran
@@ -1664,7 +1748,8 @@ EOL
     echo -e "${GREEN}Server Name: $server_name${NC}"
     echo -e "${GREEN}V2Ray Port: $V2RAY_PORT${NC}"
     echo -e "${GREEN}SSH Port: $SSH_PORT${NC}"
-    echo -e "${GREEN}Use this encrypted code in Iran panel: $UNIQUE_CODE${NC}"
+    echo -e "${GREEN}Encrypted Server Code: $UNIQUE_CODE${NC}"
+    echo -e "${CYAN}Use this code in the Iran panel to register the server.${NC}"
     log "Abroad server installation completed"
 fi
 
