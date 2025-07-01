@@ -156,10 +156,10 @@ if [[ "$choice" == "2" ]]; then
     rm -f /etc/apache2/sites-available/pakhsheshkon.conf
     DB_NAME=$(mysql -e "SHOW DATABASES LIKE 'pk_%'" | grep pk_ || echo "")
     if [[ -n "$DB_NAME" ]]; then
-        mysql -e "DROP DATABASE $DB_NAME;"
+        mysql -e "DROP DATABASE $DB_NAME;" 2>/dev/null
         log "Dropped database $DB_NAME"
     fi
-    apt purge -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache jq glances net-tools ntpdate
+    apt purge -y apache2 php php-mysql mariadb-server unzip curl libapache2-mod-php composer v2ray vnstat certbot python3-certbot-apache jq glances net-tools ntpdate bc
     apt autoremove -y
     ufw reset --force
     ufw enable
@@ -194,7 +194,12 @@ progress_bar "Updating system"
 log "Updating system"
 apt update && apt upgrade -y
 apt install -y curl jq unzip ntpdate net-tools apache2 php php-mysql mariadb-server libapache2-mod-php composer certbot python3-certbot-apache glances bc
-systemctl restart systemd-timesyncd
+if command -v ntpdate >/dev/null 2>&1; then
+    ntpdate pool.ntp.org 2>/dev/null
+else
+    timedatectl set-ntp true
+    systemctl restart systemd-timesyncd
+fi
 log "System updated and time synchronized"
 
 # Check server health
@@ -220,7 +225,7 @@ if [[ "$server_location" == "iran" ]]; then
 
     # Install V2Ray
     progress_bar "Installing V2Ray"
-    bash <(curl -L https://raw.githubusercontent.com/v2fly/v2ray-core/master/release/install-release.sh) || {
+    bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) || {
         echo -e "${RED}Failed to install V2Ray. Check network or repository.${NC}"
         log "V2Ray installation failed"
         exit 1
@@ -1520,13 +1525,6 @@ EOL
     systemctl restart apache2
     log "Configured Apache"
 
-    # Save Iran V2Ray port
-    progress_bar "Saving Iran V2Ray port"
-    mkdir -p /etc/pakhsheshkon
-    echo "$V2RAY_PORT" > /etc/pakhsheshkon/iran_port.txt
-    chmod 600 /etc/pakhsheshkon/iran_port.txt
-    log "Saved Iran V2Ray port"
-
     # Configure firewall
     progress_bar "Configuring firewall"
     ufw allow 80,443,$V2RAY_PORT/tcp
@@ -1556,7 +1554,6 @@ EOL
     echo -e "${CYAN}Admin Username: $admin_user${NC}"
     echo -e "${CYAN}Admin Password: [Your chosen password]${NC}"
     log "Iran server installation completed"
-
 else
     # Install dependencies for abroad server
     progress_bar "Installing dependencies"
@@ -1580,7 +1577,7 @@ else
 
     # Install V2Ray
     progress_bar "Installing V2Ray"
-    bash <(curl -L https://raw.githubusercontent.com/v2fly/v2ray-core/master/release/install-release.sh) || {
+    bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) || {
         echo -e "${RED}Failed to install V2Ray. Check network or repository.${NC}"
         log "V2Ray installation failed"
         exit 1
@@ -1609,7 +1606,7 @@ EOL
     chmod 600 /etc/pakhsheshkon/server.conf
     log "Saved server config"
 
-# Configure V2Ray
+    # Configure V2Ray
     progress_bar "Configuring V2Ray"
     mkdir -p /usr/local/etc/v2ray
     cat > /usr/local/etc/v2ray/config.json <<EOL
@@ -1672,7 +1669,7 @@ EOL
     fi
     log "V2Ray configured"
 
-    # Optimize network
+# Optimize network
     progress_bar "Optimizing network"
     sysctl -w net.core.rmem_max=8388608
     sysctl -w net.core.wmem_max=8388608
@@ -1689,6 +1686,11 @@ EOL
     sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
     sed -i "s/PermitRootLogin yes/PermitRootLogin no/" /etc/ssh/sshd_config
     systemctl restart sshd
+    if ! systemctl is-active --quiet sshd; then
+        echo -e "${RED}SSH service failed to start. Check logs in /var/log/auth.log.${NC}"
+        log "SSH service failed to start"
+        exit 1
+    fi
     echo -e "${GREEN}SSH port changed to $SSH_PORT. Root login disabled.${NC}"
     log "Secured SSH with port $SSH_PORT"
 
@@ -1726,11 +1728,16 @@ WantedBy=multi-user.target
 EOL
     systemctl enable pakhsheshkon-monitor
     systemctl start pakhsheshkon-monitor
+    if ! systemctl is-active --quiet pakhsheshkon-monitor; then
+        echo -e "${RED}Monitoring service failed to start. Check logs in /var/log/pakhsheshkon.log.${NC}"
+        log "Monitoring service failed to start"
+        exit 1
+    fi
     log "Configured monitoring"
 
     # Check ping to Iran
     progress_bar "Checking ping to Iran"
-    IRAN_IP=$(dig @8.8.8.8 +short iran.pakhsheshkon.com || echo "1.1.1.1")
+    IRAN_IP=$(dig @8.8.8.8 +short iran.pakhsheshkon.com || dig @1.1.1.1 +short iran.pakhsheshkon.com || echo "1.1.1.1")
     PING=$(ping -c 4 $IRAN_IP | awk '/rtt/ {print $4}' | cut -d'/' -f2 2>/dev/null)
     if [[ -n "$PING" && $(echo "$PING > 200" | bc -l) -eq 1 ]]; then
         echo -e "${YELLOW}Warning: High ping to Iran ($PING ms). Performance may be affected.${NC}"
