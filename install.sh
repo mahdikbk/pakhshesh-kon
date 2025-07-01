@@ -78,6 +78,10 @@ generate_random_string() {
 
 # Detect server location
 detect_location() {
+    if ! command -v jq &> /dev/null; then
+        echo "Unable to detect location (jq not installed)"
+        return
+    fi
     RESPONSE=$(curl -s http://ip-api.com/json)
     COUNTRY=$(echo "$RESPONSE" | jq -r '.country')
     CITY=$(echo "$RESPONSE" | jq -r '.city')
@@ -123,6 +127,7 @@ log() {
 # Main menu
 animate_logo
 echo -e "${YELLOW}Welcome to Pakhshesh Kon!${NC}"
+show_loading "Detecting server location" 5
 SERVER_LOCATION=$(detect_location)
 echo -e "${CYAN}Detected server location: $SERVER_LOCATION${NC}"
 echo -e "${CYAN}Choose an option:${NC}"
@@ -1269,18 +1274,6 @@ function decodeServerCode($code, $secretKey) {
 }
 ?>
 EOF
-
-    # includes/config.php
-    cat > "$install_path/includes/config.php" <<EOL
-<?php
-define('DB_HOST', 'localhost');
-define('DB_NAME', '$DB_NAME');
-define('DB_USER', '$DB_USER');
-define('DB_PASS', '$DB_PASS');
-define('SECRET_KEY', '$(generate_random_string)');
-define('BASE_URL', '$base_url');
-?>
-EOL
 
     # assets/css/style.css
     cat > "$install_path/assets/css/style.css" <<'EOF'
