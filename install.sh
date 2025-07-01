@@ -198,6 +198,7 @@ if command -v ntpdate >/dev/null 2>&1; then
     ntpdate pool.ntp.org 2>/dev/null
 else
     timedatectl set-ntp true
+    systemctl unmask systemd-timesyncd
     systemctl restart systemd-timesyncd
 fi
 log "System updated and time synchronized"
@@ -430,35 +431,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ورود - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
-<body class="bg-gradient bg-primary">
-    <div class="container">
-        <div class="row justify-content-center mt-5">
-            <div class="col-md-4">
-                <div class="card shadow">
-                    <div class="card-body">
-                        <h2 class="text-center mb-4">ورود به پنل</h2>
-                        <?php if (isset($error)) echo "<div class='alert alert-danger'>$error</div>"; ?>
-                        <form method="POST">
-                            <div class="mb-3">
-                                <label for="username" class="form-label">نام کاربری</label>
-                                <input type="text" class="form-control" id="username" name="username" required>
-                            </div>
-                            <div class="mb-3">
-                                <label for="password" class="form-label">رمز عبور</label>
-                                <input type="password" class="form-control" id="password" name="password" required>
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100">ورود</button>
-                        </form>
-                    </div>
+<body class="bg-gradient-to-br from-blue-900 to-indigo-800 min-h-screen flex items-center">
+    <div class="container mx-auto px-4">
+        <div class="max-w-md mx-auto bg-white rounded-2xl shadow-xl p-8">
+            <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">ورود به پنل</h2>
+            <?php if (isset($error)) echo "<div class='bg-red-100 text-red-700 p-4 rounded-lg mb-4'>$error</div>"; ?>
+            <form method="POST" class="space-y-6">
+                <div>
+                    <label for="username" class="block text-sm font-medium text-gray-700">نام کاربری</label>
+                    <input type="text" id="username" name="username" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
                 </div>
-            </div>
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-700">رمز عبور</label>
+                    <input type="password" id="password" name="password" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-300">ورود</button>
+            </form>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 EOL
@@ -476,90 +471,96 @@ if (!isLoggedIn()) {
 }
 
 $stats = getDashboardStats();
+$traffic_data = $db->query("SELECT bandwidth, recorded_at FROM monitoring WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL 5 DAY) ORDER BY recorded_at")->fetchAll();
+$ping_data = $db->query("SELECT ping, server_id FROM monitoring WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL 5 DAY) ORDER BY recorded_at")->fetchAll();
+$users_data = $db->query("SELECT active_users, recorded_at FROM monitoring WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL 5 DAY) ORDER BY recorded_at")->fetchAll();
+$traffic_labels = json_encode(array_column($traffic_data, 'recorded_at'));
+$traffic_values = json_encode(array_column($traffic_data, 'bandwidth'));
+$ping_values = json_encode(array_column($ping_data, 'ping'));
+$users_values = json_encode(array_column($users_data, 'active_users'));
 ?>
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>داشبورد - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>خوش آمدید!</h1>
-        <div class="row">
-            <div class="col-md-4">
-                <div class="card shadow">
-                    <div class="card-body">
-                        <h5 class="card-title">تعداد کاربران</h5>
-                        <p class="card-text"><?php echo $stats['users']; ?></p>
-                    </div>
-                </div>
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">خوش آمدید!</h1>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-white rounded-2xl shadow-xl p-6">
+                <h5 class="text-xl font-semibold text-gray-700">تعداد کاربران</h5>
+                <p class="text-3xl text-indigo-600"><?php echo $stats['users']; ?></p>
             </div>
-            <div class="col-md-4">
-                <div class="card shadow">
-                    <div class="card-body">
-                        <h5 class="card-title">سرورهای فعال</h5>
-                        <p class="card-text"><?php echo $stats['servers']; ?></p>
-                    </div>
-                </div>
+            <div class="bg-white rounded-2xl shadow-xl p-6">
+                <h5 class="text-xl font-semibold text-gray-700">سرورهای فعال</h5>
+                <p class="text-3xl text-indigo-600"><?php echo $stats['servers']; ?></p>
             </div>
-            <div class="col-md-4">
-                <div class="card shadow">
-                    <div class="card-body">
-                        <h5 class="card-title">ترافیک کل</h5>
-                        <p class="card-text"><?php echo $stats['traffic']; ?> GB</p>
-                    </div>
-                </div>
+            <div class="bg-white rounded-2xl shadow-xl p-6">
+                <h5 class="text-xl font-semibold text-gray-700">ترافیک کل</h5>
+                <p class="text-3xl text-indigo-600"><?php echo $stats['traffic']; ?> GB</p>
             </div>
         </div>
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <div class="card shadow">
-                    <div class="card-body">
-                        <h5 class="card-title">مصرف پهنای باند</h5>
-                        <canvas id="trafficChart"></canvas>
-                    </div>
-                </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+            <div class="bg-white rounded-2xl shadow-xl p-6">
+                <h5 class="text-xl font-semibold text-gray-700 mb-4">مصرف پهنای باند</h5>
+                <canvas id="trafficChart"></canvas>
             </div>
-            <div class="col-md-6">
-                <div class="card shadow">
-                    <div class="card-body">
-                        <h5 class="card-title">پینگ سرورها</h5>
-                        <canvas id="pingChart"></canvas>
-                    </div>
-                </div>
+            <div class="bg-white rounded-2xl shadow-xl p-6">
+                <h5 class="text-xl font-semibold text-gray-700 mb-4">پینگ سرورها</h5>
+                <canvas id="pingChart"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl shadow-xl p-6">
+                <h5 class="text-xl font-semibold text-gray-700 mb-4">کاربران فعال</h5>
+                <canvas id="usersChart"></canvas>
             </div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/script.js"></script>
     <script>
         new Chart(document.getElementById('trafficChart'), {
             type: 'line',
             data: {
-                labels: ['روز 1', 'روز 2', 'روز 3', 'روز 4', 'روز 5'],
+                labels: <?php echo $traffic_labels; ?>,
                 datasets: [{
-                    label: 'ترافیک (GB)',
-                    data: [10, 20, 15, 25, 30],
-                    borderColor: '#007bff',
+                    label: 'ترافیک (MB/s)',
+                    data: <?php echo $traffic_values; ?>,
+                    borderColor: '#4f46e5',
                     fill: false
                 }]
-            }
+            },
+            options: { scales: { y: { beginAtZero: true } } }
         });
         new Chart(document.getElementById('pingChart'), {
             type: 'bar',
             data: {
-                labels: ['سرور 1', 'سرور 2', 'سرور 3'],
+                labels: <?php echo $traffic_labels; ?>,
                 datasets: [{
                     label: 'پینگ (ms)',
-                    data: [50, 30, 70],
-                    backgroundColor: '#28a745'
+                    data: <?php echo $ping_values; ?>,
+                    backgroundColor: '#10b981'
                 }]
-            }
+            },
+            options: { scales: { y: { beginAtZero: true } } }
+        });
+        new Chart(document.getElementById('usersChart'), {
+            type: 'line',
+            data: {
+                labels: <?php echo $traffic_labels; ?>,
+                datasets: [{
+                    label: 'کاربران فعال',
+                    data: <?php echo $users_values; ?>,
+                    borderColor: '#ef4444',
+                    fill: false
+                }]
+            },
+            options: { scales: { y: { beginAtZero: true } } }
         });
     </script>
 </body>
@@ -585,7 +586,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $days = $_POST['days'];
     $group_id = $_POST['group_id'];
     $result = createUser($username, $traffic_limit, $connection_limit, $days, $group_id);
-    $success = "کاربر با موفقیت ایجاد شد! لینک: <a href='{$result['link']}'>{$result['link']}</a>";
+    $success = "کاربر با موفقیت ایجاد شد! لینک: <a href='{$result['link']}' class='text-indigo-600'>{$result['link']}</a>";
 }
 
 $groups = $db->query("SELECT * FROM server_groups")->fetchAll();
@@ -595,87 +596,91 @@ $users = $db->query("SELECT u.*, g.name AS group_name FROM users u JOIN server_g
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>مدیریت کاربران - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>مدیریت کاربران</h1>
-        <?php if (isset($success)) echo "<div class='alert alert-success'>$success</div>"; ?>
-        <form method="POST" class="mb-4">
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label for="username" class="form-label">نام کاربری</label>
-                    <input type="text" class="form-control" id="username" name="username" required>
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">مدیریت کاربران</h1>
+        <?php if (isset($success)) echo "<div class='bg-green-100 text-green-700 p-4 rounded-lg mb-4'>$success</div>"; ?>
+        <form method="POST" class="bg-white rounded-2xl shadow-xl p-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="username" class="block text-sm font-medium text-gray-700">نام کاربری</label>
+                    <input type="text" id="username" name="username" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
                 </div>
-                <div class="col-md-6 mb-3">
-                    <label for="traffic_limit" class="form-label">محدودیت ترافیک (GB)</label>
-                    <input type="number" class="form-control" id="traffic_limit" name="traffic_limit" required>
+                <div>
+                    <label for="traffic_limit" class="block text-sm font-medium text-gray-700">محدودیت ترافیک (GB)</label>
+                    <input type="number" id="traffic_limit" name="traffic_limit" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
                 </div>
-                <div class="col-md-6 mb-3">
-                    <label for="connection_limit" class="form-label">تعداد اتصال</label>
-                    <input type="number" class="form-control" id="connection_limit" name="connection_limit" required>
+                <div>
+                    <label for="connection_limit" class="block text-sm font-medium text-gray-700">تعداد اتصال</label>
+                    <input type="number" id="connection_limit" name="connection_limit" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
                 </div>
-                <div class="col-md-6 mb-3">
-                    <label for="days" class="form-label">مدت زمان (روز)</label>
-                    <input type="number" class="form-control" id="days" name="days" required>
+                <div>
+                    <label for="days" class="block text-sm font-medium text-gray-700">مدت زمان (روز)</label>
+                    <input type="number" id="days" name="days" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
                 </div>
-                <div class="col-md-6 mb-3">
-                    <label for="group_id" class="form-label">گروه سرور</label>
-                    <select class="form-control" id="group_id" name="group_id" required>
+                <div>
+                    <label for="group_id" class="block text-sm font-medium text-gray-700">گروه سرور</label>
+                    <select id="group_id" name="group_id" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
                         <?php foreach ($groups as $group) {
                             echo "<option value='{$group['id']}'>{$group['name']}</option>";
                         } ?>
                     </select>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary">ایجاد کاربر</button>
+            <button type="submit" class="mt-6 w-full bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-300">ایجاد کاربر</button>
         </form>
-        <h3>کاربران موجود</h3>
-        <table class="table table-bordered table-hover">
-            <thead>
-                <tr>
-                    <th>نام کاربری</th>
-                    <th>گروه سرور</th>
-                    <th>ترافیک (GB)</th>
-                    <th>اتصال</th>
-                    <th>انقضا</th>
-                    <th>لینک</th>
-                    <th>QR کد</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($users as $user) {
-                    echo "<tr>
-                        <td>{$user['username']}</td>
-                        <td>{$user['group_name']}</td>
-                        <td>" . ($user['traffic_limit'] / (1024 * 1024 * 1024)) . "</td>
-                        <td>{$user['connection_limit']}</td>
-                        <td>{$user['expiry_date']}</td>
-                        <td><a href='{$user['link']}' class='btn btn-sm btn-link'>لینک</a></td>
-                        <td><button class='btn btn-sm btn-info' data-bs-toggle='modal' data-bs-target='#qrModal{$user['id']}'>نمایش</button></td>
-                    </tr>";
-                    echo "<div class='modal fade' id='qrModal{$user['id']}' tabindex='-1'>
-                        <div class='modal-dialog'>
-                            <div class='modal-content'>
-                                <div class='modal-header'>
-                                    <h5 class='modal-title'>QR کد برای {$user['username']}</h5>
-                                    <button type='button' class='btn-close' data-bs-dismiss='modal'></button>
-                                </div>
-                                <div class='modal-body'>
-                                    <img src='{$user['qr_path']}' class='img-fluid'>
-                                    <a href='{$user['qr_path']}' download class='btn btn-primary mt-2'>دانلود QR</a>
+        <h3 class="text-2xl font-semibold text-gray-700 mb-4">کاربران موجود</h3>
+        <div class="bg-white rounded-2xl shadow-xl p-6">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b">
+                        <th class="py-3 px-4 text-right">نام کاربری</th>
+                        <th class="py-3 px-4 text-right">گروه سرور</th>
+                        <th class="py-3 px-4 text-right">ترافیک (GB)</th>
+                        <th class="py-3 px-4 text-right">اتصال</th>
+                        <th class="py-3 px-4 text-right">انقضا</th>
+                        <th class="py-3 px-4 text-right">لینک</th>
+                        <th class="py-3 px-4 text-right">QR کد</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($users as $user) {
+                        echo "<tr class='border-b hover:bg-gray-50'>
+                            <td class='py-3 px-4'>{$user['username']}</td>
+                            <td class='py-3 px-4'>{$user['group_name']}</td>
+                            <td class='py-3 px-4'>" . ($user['traffic_limit'] / (1024 * 1024 * 1024)) . "</td>
+                            <td class='py-3 px-4'>{$user['connection_limit']}</td>
+                            <td class='py-3 px-4'>{$user['expiry_date']}</td>
+                            <td class='py-3 px-4'><a href='{$user['link']}' class='text-indigo-600 hover:underline'>لینک</a></td>
+                            <td class='py-3 px-4'><button class='bg-indigo-600 text-white px-4 py-2 rounded-lg' data-bs-toggle='modal' data-bs-target='#qrModal{$user['id']}'>نمایش</button></td>
+                        </tr>";
+                        echo "<div class='modal fade fixed top-0 left-0 hidden w-full h-full bg-black bg-opacity-50' id='qrModal{$user['id']}' tabindex='-1'>
+                            <div class='modal-dialog relative w-auto mx-auto max-w-md'>
+                                <div class='modal-content bg-white rounded-2xl shadow-xl p-6'>
+                                    <div class='modal-header flex justify-between items-center'>
+                                        <h5 class='text-xl font-semibold text-gray-700'>QR کد برای {$user['username']}</h5>
+                                        <button type='button' class='text-gray-500 hover:text-gray-700' data-bs-dismiss='modal'>&times;</button>
+                                    </div>
+                                    <div class='modal-body'>
+                                        <img src='{$user['qr_path']}' class='w-full'>
+                                        <a href='{$user['qr_path']}' download class='block mt-4 bg-indigo-600 text-white p-3 rounded-lg text-center hover:bg-indigo-700'>دانلود QR</a>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>";
-                } ?>
-            </tbody>
-        </table>
+                        </div>";
+                    } ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.min.js"></script>
 </body>
 </html>
 EOL
@@ -721,60 +726,62 @@ $servers = $db->query("SELECT s.*, g.name AS group_name FROM servers s JOIN serv
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>مدیریت سرورها - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>مدیریت سرورها</h1>
-        <?php if (isset($success)) echo "<div class='alert alert-success'>$success</div>"; ?>
-        <?php if (isset($error)) echo "<div class='alert alert-danger'>$error</div>"; ?>
-        <form method="POST" class="mb-4">
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label for="server_code" class="form-label">کد رمزنگاری‌شده سرور</label>
-                    <input type="text" class="form-control" id="server_code" name="server_code" required>
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">مدیریت سرورها</h1>
+        <?php if (isset($success)) echo "<div class='bg-green-100 text-green-700 p-4 rounded-lg mb-4'>$success</div>"; ?>
+        <?php if (isset($error)) echo "<div class='bg-red-100 text-red-700 p-4 rounded-lg mb-4'>$error</div>"; ?>
+        <form method="POST" class="bg-white rounded-2xl shadow-xl p-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="server_code" class="block text-sm font-medium text-gray-700">کد رمزنگاری‌شده سرور</label>
+                    <input type="text" id="server_code" name="server_code" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
                 </div>
-                <div class="col-md-6 mb-3">
-                    <label for="group_id" class="form-label">گروه سرور</label>
-                    <select class="form-control" id="group_id" name="group_id" required>
+                <div>
+                    <label for="group_id" class="block text-sm font-medium text-gray-700">گروه سرور</label>
+                    <select id="group_id" name="group_id" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
                         <?php foreach ($groups as $group) {
                             echo "<option value='{$group['id']}'>{$group['name']}</option>";
                         } ?>
                     </select>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary">اضافه کردن سرور</button>
+            <button type="submit" class="mt-6 w-full bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-300">اضافه کردن سرور</button>
         </form>
-        <h3>سرورهای موجود</h3>
-        <table class="table table-bordered table-hover">
-            <thead>
-                <tr>
-                    <th>گروه</th>
-                    <th>نام</th>
-                    <th>IP</th>
-                    <th>پورت</th>
-                    <th>وضعیت</th>
-                    <th>عملیات</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($servers as $server) {
-                    echo "<tr>
-                        <td>{$server['group_name']}</td>
-                        <td>{$server['name']}</td>
-                        <td>{$server['ip']}</td>
-                        <td>{$server['port']}</td>
-                        <td>{$server['status']}</td>
-                        <td><button class='btn btn-sm btn-info' onclick='testPing({$server['id']})'>تست پینگ</button></td>
-                    </tr>";
-                } ?>
-            </tbody>
-        </table>
+        <h3 class="text-2xl font-semibold text-gray-700 mb-4">سرورهای موجود</h3>
+        <div class="bg-white rounded-2xl shadow-xl p-6">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b">
+                        <th class="py-3 px-4 text-right">گروه</th>
+                        <th class="py-3 px-4 text-right">نام</th>
+                        <th class="py-3 px-4 text-right">IP</th>
+                        <th class="py-3 px-4 text-right">پورت</th>
+                        <th class="py-3 px-4 text-right">وضعیت</th>
+                        <th class="py-3 px-4 text-right">عملیات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($servers as $server) {
+                        echo "<tr class='border-b hover:bg-gray-50'>
+                            <td class='py-3 px-4'>{$server['group_name']}</td>
+                            <td class='py-3 px-4'>{$server['name']}</td>
+                            <td class='py-3 px-4'>{$server['ip']}</td>
+                            <td class='py-3 px-4'>{$server['port']}</td>
+                            <td class='py-3 px-4'>{$server['status']}</td>
+                            <td class='py-3 px-4'><button class='bg-indigo-600 text-white px-4 py-2 rounded-lg' onclick='testPing({$server['id']})'>تست پینگ</button></td>
+                        </tr>";
+                    } ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/script.js"></script>
 </body>
 </html>
@@ -804,41 +811,43 @@ $groups = $db->query("SELECT * FROM server_groups")->fetchAll();
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>گروه‌های سرور - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>مدیریت گروه‌های سرور</h1>
-        <?php if (isset($success)) echo "<div class='alert alert-success'>$success</div>"; ?>
-        <form method="POST" class="mb-4">
-            <div class="mb-3">
-                <label for="group_name" class="form-label">نام گروه (مثلاً اروپا)</label>
-                <input type="text" class="form-control" id="group_name" name="group_name" required>
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">مدیریت گروه‌های سرور</h1>
+        <?php if (isset($success)) echo "<div class='bg-green-100 text-green-700 p-4 rounded-lg mb-4'>$success</div>"; ?>
+        <form method="POST" class="bg-white rounded-2xl shadow-xl p-6 mb-8">
+            <div>
+                <label for="group_name" class="block text-sm font-medium text-gray-700">نام گروه (مثلاً اروپا)</label>
+                <input type="text" id="group_name" name="group_name" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
             </div>
-            <button type="submit" class="btn btn-primary">اضافه کردن گروه</button>
+            <button type="submit" class="mt-6 w-full bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-300">اضافه کردن گروه</button>
         </form>
-        <h3>گروه‌های موجود</h3>
-        <table class="table table-bordered table-hover">
-            <thead>
-                <tr>
-                    <th>نام گروه</th>
-                    <th>تاریخ ایجاد</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($groups as $group) {
-                    echo "<tr>
-                        <td>{$group['name']}</td>
-                        <td>{$group['created_at']}</td>
-                    </tr>";
-                } ?>
-            </tbody>
-        </table>
+        <h3 class="text-2xl font-semibold text-gray-700 mb-4">گروه‌های موجود</h3>
+        <div class="bg-white rounded-2xl shadow-xl p-6">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b">
+                        <th class="py-3 px-4 text-right">نام گروه</th>
+                        <th class="py-3 px-4 text-right">تاریخ ایجاد</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($groups as $group) {
+                        echo "<tr class='border-b hover:bg-gray-50'>
+                            <td class='py-3 px-4'>{$group['name']}</td>
+                            <td class='py-3 px-4'>{$group['created_at']}</td>
+                        </tr>";
+                    } ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 EOL
@@ -861,35 +870,30 @@ $servers = $db->query("SELECT s.*, g.name AS group_name FROM servers s JOIN serv
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>مانیتورینگ - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>مانیتورینگ سرورها</h1>
-        <div class="row">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">مانیتورینگ سرورها</h1>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <?php foreach ($servers as $server) {
                 $stats = $db->query("SELECT * FROM monitoring WHERE server_id = {$server['id']} ORDER BY recorded_at DESC LIMIT 1")->fetch();
                 ?>
-                <div class="col-md-4 mb-4">
-                    <div class="card shadow">
-                        <div class="card-body">
-                            <h5 class="card-title"><?php echo $server['name']; ?> (<?php echo $server['group_name']; ?>)</h5>
-                            <p>IP: <?php echo $server['ip']; ?></p>
-                            <p>کاربران فعال: <?php echo $stats['active_users'] ?? 'N/A'; ?></p>
-                            <p>پهنای باند: <?php echo $stats['bandwidth'] ?? 'N/A'; ?></p>
-                            <p>پینگ: <?php echo $stats['ping'] ?? 'N/A'; ?> ms</p>
-                            <button class="btn btn-sm btn-info" onclick="testPing(<?php echo $server['id']; ?>)">تست پینگ</button>
-                        </div>
-                    </div>
+                <div class="bg-white rounded-2xl shadow-xl p-6">
+                    <h5 class="text-xl font-semibold text-gray-700"><?php echo $server['name']; ?> (<?php echo $server['group_name']; ?>)</h5>
+                    <p class="text-gray-600">IP: <?php echo $server['ip']; ?></p>
+                    <p class="text-gray-600">کاربران فعال: <?php echo $stats['active_users'] ?? 'N/A'; ?></p>
+                    <p class="text-gray-600">پهنای باند: <?php echo $stats['bandwidth'] ?? 'N/A'; ?></p>
+                    <p class="text-gray-600">پینگ: <?php echo $stats['ping'] ?? 'N/A'; ?> ms</p>
+                    <button class="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700" onclick="testPing(<?php echo $server['id']; ?>)">تست پینگ</button>
                 </div>
             <?php } ?>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/script.js"></script>
 </body>
 </html>
@@ -916,27 +920,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>تنظیمات - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>تنظیمات</h1>
-        <?php if (isset($success)) echo "<div class='alert alert-success'>$success</div>"; ?>
-        <form method="POST" class="mb-4">
-            <div class="mb-3">
-                <label for="theme" class="form-label">تم پنل</label>
-                <select class="form-control" id="theme" name="theme">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">تنظیمات</h1>
+        <?php if (isset($success)) echo "<div class='bg-green-100 text-green-700 p-4 rounded-lg mb-4'>$success</div>"; ?>
+        <form method="POST" class="bg-white rounded-2xl shadow-xl p-6">
+            <div>
+                <label for="theme" class="block text-sm font-medium text-gray-700">تم پنل</label>
+                <select id="theme" name="theme" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
                     <option value="light">روشن</option>
                     <option value="dark">تاریک</option>
                 </select>
             </div>
-            <button type="submit" class="btn btn-primary">ذخیره</button>
+            <button type="submit" class="mt-6 w-full bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-300">ذخیره</button>
         </form>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 EOL
@@ -962,36 +966,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>به‌روزرسانی - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>به‌روزرسانی پنل</h1>
-        <button id="updateBtn" class="btn btn-primary">به‌روزرسانی از گیت‌هاب</button>
-        <div id="loading" class="d-none mt-3">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">در حال به‌روزرسانی...</span>
-            </div>
-            <span>در حال به‌روزرسانی...</span>
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">به‌روزرسانی پنل</h1>
+        <button id="updateBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition duration-300">به‌روزرسانی از گیت‌هاب</button>
+        <div id="loading" class="hidden mt-4">
+            <div class="animate-spin h-8 w-8 border-4 border-indigo-600 rounded-full border-t-transparent"></div>
+            <span class="ml-2 text-gray-700">در حال به‌روزرسانی...</span>
         </div>
-        <div id="updateResult" class="mt-3"></div>
+        <div id="updateResult" class="mt-4"></div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.getElementById('updateBtn').addEventListener('click', () => {
-            document.getElementById('loading').classList.remove('d-none');
+            document.getElementById('loading').classList.remove('hidden');
             fetch('update.php', { method: 'POST' })
                 .then(response => response.json())
                 .then(data => {
-                    document.getElementById('loading').classList.add('d-none');
-                    document.getElementById('updateResult').innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+                    document.getElementById('loading').classList.add('hidden');
+                    document.getElementById('updateResult').innerHTML = `<div class="bg-green-100 text-green-700 p-4 rounded-lg">${data.message}</div>`;
                 })
                 .catch(error => {
-                    document.getElementById('loading').classList.add('d-none');
-                    document.getElementById('updateResult').innerHTML = '<div class="alert alert-danger">خطا در به‌روزرسانی: ' + error + '</div>';
+                    document.getElementById('loading').classList.add('hidden');
+                    document.getElementById('updateResult').innerHTML = `<div class="bg-red-100 text-red-700 p-4 rounded-lg">خطا در به‌روزرسانی: ${error}</div>`;
                 });
         });
     </script>
@@ -1028,47 +1030,49 @@ $tickets = $db->query("SELECT * FROM tickets WHERE user_id = {$_SESSION['user_id
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>تیکت‌ها - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>تیکت‌های پشتیبانی</h1>
-        <?php if (isset($success)) echo "<div class='alert alert-success'>$success</div>"; ?>
-        <form method="POST" class="mb-4">
-            <div class="mb-3">
-                <label for="title" class="form-label">عنوان تیکت</label>
-                <input type="text" class="form-control" id="title" name="title" required>
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">تیکت‌های پشتیبانی</h1>
+        <?php if (isset($success)) echo "<div class='bg-green-100 text-green-700 p-4 rounded-lg mb-4'>$success</div>"; ?>
+        <form method="POST" class="bg-white rounded-2xl shadow-xl p-6 mb-8">
+            <div class="mb-4">
+                <label for="title" class="block text-sm font-medium text-gray-700">عنوان تیکت</label>
+                <input type="text" id="title" name="title" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
             </div>
-            <div class="mb-3">
-                <label for="message" class="form-label">پیام</label>
-                <textarea class="form-control" id="message" name="message" rows="5" required></textarea>
+            <div class="mb-4">
+                <label for="message" class="block text-sm font-medium text-gray-700">پیام</label>
+                <textarea id="message" name="message" rows="5" class="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required></textarea>
             </div>
-            <button type="submit" class="btn btn-primary">ارسال تیکت</button>
+            <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-300">ارسال تیکت</button>
         </form>
-        <h3>تیکت‌های ارسالی</h3>
-        <table class="table table-bordered table-hover">
-            <thead>
-                <tr>
-                    <th>عنوان</th>
-                    <th>پیام</th>
-                    <th>تاریخ</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($tickets as $ticket) {
-                    echo "<tr>
-                        <td>{$ticket['title']}</td>
-                        <td>{$ticket['message']}</td>
-                        <td>{$ticket['created_at']}</td>
-                    </tr>";
-                } ?>
-            </tbody>
-        </table>
+        <h3 class="text-2xl font-semibold text-gray-700 mb-4">تیکت‌های ارسالی</h3>
+        <div class="bg-white rounded-2xl shadow-xl p-6">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b">
+                        <th class="py-3 px-4 text-right">عنوان</th>
+                        <th class="py-3 px-4 text-right">پیام</th>
+                        <th class="py-3 px-4 text-right">تاریخ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($tickets as $ticket) {
+                        echo "<tr class='border-b hover:bg-gray-50'>
+                            <td class='py-3 px-4'>{$ticket['title']}</td>
+                            <td class='py-3 px-4'>{$ticket['message']}</td>
+                            <td class='py-3 px-4'>{$ticket['created_at']}</td>
+                        </tr>";
+                    } ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 EOL
@@ -1091,36 +1095,38 @@ $logs = $db->query("SELECT * FROM logs ORDER BY created_at DESC LIMIT 100")->fet
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>لاگ‌ها - پخشش کن!</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="assets/css/style.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen">
     <?php include 'includes/nav.php'; ?>
-    <div class="container mt-4">
-        <h1>لاگ‌های سیستم</h1>
-        <table class="table table-bordered table-hover">
-            <thead>
-                <tr>
-                    <th>فعالیت</th>
-                    <th>کاربر</th>
-                    <th>IP</th>
-                    <th>زمان</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($logs as $log) {
-                    echo "<tr>
-                        <td>{$log['action']}</td>
-                        <td>{$log['username']}</td>
-                        <td>{$log['ip']}</td>
-                        <td>{$log['created_at']}</td>
-                    </tr>";
-                } ?>
-            </tbody>
-        </table>
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-8">لاگ‌های سیستم</h1>
+        <div class="bg-white rounded-2xl shadow-xl p-6">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b">
+                        <th class="py-3 px-4 text-right">فعالیت</th>
+                        <th class="py-3 px-4 text-right">کاربر</th>
+                        <th class="py-3 px-4 text-right">IP</th>
+                        <th class="py-3 px-4 text-right">زمان</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($logs as $log) {
+                        echo "<tr class='border-b hover:bg-gray-50'>
+                            <td class='py-3 px-4'>{$log['action']}</td>
+                            <td class='py-3 px-4'>{$log['username']}</td>
+                            <td class='py-3 px-4'>{$log['ip']}</td>
+                            <td class='py-3 px-4'>{$log['created_at']}</td>
+                        </tr>";
+                    } ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 EOL
@@ -1128,30 +1134,54 @@ EOL
     # includes/nav.php
     cat > "$install_path/includes/nav.php" <<'EOL'
 <?php
-$base_url = defined('BASE_URL') ? BASE_URL : '';
+$base_url = defined('BASE_URL') ? '/' . BASE_URL : '';
 ?>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
-    <div class="container">
-        <a class="navbar-brand" href="<?php echo $base_url; ?>/dashboard.php">پخشش کن!</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav me-auto">
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/dashboard.php">داشبورد</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/users.php">کاربران</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/servers.php">سرورها</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/server-groups.php">گروه‌های سرور</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/monitoring.php">مانیتورینگ</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/tickets.php">تیکت‌ها</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/logs.php">لاگ‌ها</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/settings.php">تنظیمات</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?php echo $base_url; ?>/update.php">به‌روزرسانی</a></li>
-            </ul>
-            <a href="<?php echo $base_url; ?>/logout.php" class="btn btn-outline-light">خروج</a>
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="assets/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="bg-gray-900 shadow-lg">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <a href="<?php echo $base_url; ?>/dashboard.php" class="text-2xl font-bold text-white">پخشش کن!</a>
+                <div class="flex items-center space-x-4">
+                    <div class="hidden md:flex space-x-4">
+                        <a href="<?php echo $base_url; ?>/dashboard.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">داشبورد</a>
+                        <a href="<?php echo $base_url; ?>/users.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">کاربران</a>
+                        <a href="<?php echo $base_url; ?>/servers.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">سرورها</a>
+                        <a href="<?php echo $base_url; ?>/server-groups.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">گروه‌های سرور</a>
+                        <a href="<?php echo $base_url; ?>/monitoring.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">مانیتورینگ</a>
+                        <a href="<?php echo $base_url; ?>/tickets.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">تیکت‌ها</a>
+                        <a href="<?php echo $base_url; ?>/logs.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">لاگ‌ها</a>
+                        <a href="<?php echo $base_url; ?>/settings.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">تنظیمات</a>
+                        <a href="<?php echo $base_url; ?>/update.php" class="text-gray-300 hover:text-white px-3 py-2 rounded-md">به‌روزرسانی</a>
+                    </div>
+                    <a href="<?php echo $base_url; ?>/logout.php" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">خروج</a>
+                </div>
+                <button class="md:hidden text-white" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                </button>
+            </div>
+            <div id="mobile-menu" class="md:hidden hidden">
+                <a href="<?php echo $base_url; ?>/dashboard.php" class="block text-gray-300 hover:text-white px-3 py-2">داشبورد</a>
+                <a href="<?php echo $base_url; ?>/users.php" class="block text-gray-300 hover:text-white px-3 py-2">کاربران</a>
+                <a href="<?php echo $base_url; ?>/servers.php" class="block text-gray-300 hover:text-white px-3 py-2">سرورها</a>
+                <a href="<?php echo $base_url; ?>/server-groups.php" class="block text-gray-300 hover:text-white px-3 py-2">گروه‌های سرور</a>
+                <a href="<?php echo $base_url; ?>/monitoring.php" class="block text-gray-300 hover:text-white px-3 py-2">مانیتورینگ</a>
+                <a href="<?php echo $base_url; ?>/tickets.php" class="block text-gray-300 hover:text-white px-3 py-2">تیکت‌ها</a>
+                <a href="<?php echo $base_url; ?>/logs.php" class="block text-gray-300 hover:text-white px-3 py-2">لاگ‌ها</a>
+                <a href="<?php echo $base_url; ?>/settings.php" class="block text-gray-300 hover:text-white px-3 py-2">تنظیمات</a>
+                <a href="<?php echo $base_url; ?>/update.php" class="block text-gray-300 hover:text-white px-3 py-2">به‌روزرسانی</a>
+            </div>
         </div>
-    </div>
-</nav>
+    </nav>
+</body>
+</html>
 EOL
 
     # includes/auth.php
@@ -1297,12 +1327,14 @@ function getPing($ip) {
 }
 
 function getServerLoad($serverId) {
-    return rand(0, 100); // Replace with real load
+    global $db;
+    $load = $db->query("SELECT active_users FROM monitoring WHERE server_id = $serverId ORDER BY recorded_at DESC LIMIT 1")->fetchColumn();
+    return $load ? (int)$load : 0;
 }
 ?>
 EOL
 
-    # includes/server-key.php
+# includes/server-key.php
     cat > "$install_path/includes/server-key.php" <<'EOL'
 <?php
 function generateServerCode($ip, $port, $name, $secretKey) {
@@ -1342,42 +1374,52 @@ EOL
     # assets/css/style.css
     cat > "$install_path/assets/css/style.css" <<'EOL'
 @font-face {
-    font-family: 'IRANSans';
-    src: url('../fonts/iransans.ttf') format('truetype');
+    font-family: 'Yekan';
+    src: url('../fonts/Yekan.ttf') format('truetype');
 }
 body {
-    font-family: 'IRANSans', sans-serif;
+    font-family: 'Yekan', sans-serif;
     background: #f4f7fa;
 }
 .navbar {
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
 }
 .card {
-    border-radius: 10px;
-    transition: transform 0.2s;
+    border-radius: 1rem;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 .card:hover {
-    transform: translateY(-5px);
+    transform: translateY(-8px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.15);
 }
 .table {
     background: #fff;
-    border-radius: 10px;
+    border-radius: 1rem;
+    overflow: hidden;
 }
 .bg-gradient {
     background: linear-gradient(135deg, #1e3c72, #2a5298);
 }
 .btn {
-    transition: all 0.3s;
+    transition: transform 0.2s ease, background-color 0.2s ease;
 }
 .btn:hover {
     transform: scale(1.05);
 }
 .dark {
-    background: #343a40;
-    color: #fff;
+    background: #1f2937;
+    color: #f9fafb;
 }
 .dark .card, .dark .table {
-    background: #444;
+    background: #374151;
+    color: #f9fafb;
+}
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
 }
 EOL
 
@@ -1414,10 +1456,71 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]
 EOL
 
+    # ping.php
+    cat > "$install_path/ping.php" <<'EOL'
+<?php
+require_once 'includes/db.php';
+require_once 'includes/functions.php';
+
+if (isset($_GET['server_id'])) {
+    $server_id = $_GET['server_id'];
+    $server = $db->prepare("SELECT ip FROM servers WHERE id = ?");
+    $server->execute([$server_id]);
+    $server = $server->fetch();
+    if ($server) {
+        $ping = getPing($server['ip']);
+        echo json_encode(['ping' => $ping]);
+    } else {
+        echo json_encode(['error' => 'Server not found']);
+    }
+} else {
+    echo json_encode(['error' => 'Invalid request']);
+}
+?>
+EOL
+
+    # monitor.php
+    cat > "$install_path/monitor.php" <<'EOL'
+<?php
+require_once 'includes/db.php';
+require_once 'includes/server-key.php';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $server_code = $_POST['server_code'];
+    $users = $_POST['users'];
+    $bandwidth = $_POST['bandwidth'];
+    $ping = $_POST['ping'];
+    
+    $secretKey = SECRET_KEY;
+    $serverData = decodeServerCode($server_code, $secretKey);
+    
+    if ($serverData) {
+        $db->prepare("INSERT INTO monitoring (server_id, active_users, bandwidth, ping, recorded_at) VALUES ((SELECT id FROM servers WHERE unique_code = ?), ?, ?, ?, NOW())")->execute([
+            $server_code,
+            $users,
+            $bandwidth,
+            $ping
+        ]);
+        echo json_shape(['status' => 'success']);
+    } else {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid server code']);
+    }
+}
+?>
+EOL
+
     # Install composer dependencies
     progress_bar "Installing Composer dependencies"
     composer require endroid/qr-code -d "$install_path"
     log "Installed Composer dependencies"
+
+    # Download Yekan font
+    progress_bar "Downloading Yekan font"
+    curl -L -o "$install_path/assets/fonts/Yekan.ttf" https://github.com/DediData/Yekan-Font/raw/master/font/Yekan.ttf || {
+        echo -e "${YELLOW}Failed to download Yekan font. Using default font.${NC}"
+        log "Failed to download Yekan font"
+    }
+    log "Downloaded Yekan font"
 
     # Create database tables
     progress_bar "Creating database tables"
@@ -1537,14 +1640,6 @@ EOL
     chmod -R 755 "$install_path"
     chmod 777 "$install_path/qrcodes"
     log "Set file permissions"
-
-    # Download IranSans font
-    progress_bar "Downloading IranSans font"
-    curl -L -o "$install_path/assets/fonts/iransans.ttf" https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/assets/fonts/iransans.ttf || {
-        echo -e "${YELLOW}Failed to download IranSans font. Using default font.${NC}"
-        log "Failed to download IranSans font"
-    }
-    log "Downloaded IranSans font"
 
     # Final message
     progress_bar "Finalizing setup"
@@ -1669,7 +1764,7 @@ EOL
     fi
     log "V2Ray configured"
 
-# Optimize network
+    # Optimize network
     progress_bar "Optimizing network"
     sysctl -w net.core.rmem_max=8388608
     sysctl -w net.core.wmem_max=8388608
