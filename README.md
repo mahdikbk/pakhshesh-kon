@@ -66,7 +66,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/in
    - `2) Uninstall Pakhshesh Kon`: حذف کامل پنل و فایل‌ها
    - `3) Exit`: خروج از اسکریپت
 2. **نوع سرور**: انتخاب کنید سرور **ایران** یا **خارجی** است:
-   - **ایران**: نیاز به دامنه (مثل `iran.doregi.ir`) و مسیر URL (مثل `kbkpanel`) داره.
+   - **ایران**: نیاز به دامنه (مثل `iran.xxx.ir`) و مسیر URL (مثل `kbkpanel`) داره.
    - **خارجی**: فقط نام سرور (مثل `Finland-1`) نیازه.
 3. **وارد کردن اطلاعات**:
    - برای سرور ایران: نام کاربری ادمین، رمز، دامنه، و مسیر URL.
