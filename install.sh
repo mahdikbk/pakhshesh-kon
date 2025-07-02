@@ -212,6 +212,9 @@ mkdir -p /var/backups/pakhsheshkon
 tar -czf /var/backups/pakhsheshkon/initial_backup_$(date +%F).tar.gz /etc 2>/dev/null
 log "Initial backup created"
 
+# Generate a global secret key for both servers
+SECRET_KEY=$(generate_random_string)
+
 if [[ "$server_location" == "iran" ]]; then
     # Ensure MariaDB is running
     progress_bar "Starting MariaDB"
@@ -665,7 +668,7 @@ $users = $db->query("SELECT u.*, g.name AS group_name FROM users u JOIN server_g
                                 <div class='modal-content bg-white rounded-2xl shadow-xl p-6'>
                                     <div class='modal-header flex justify-between items-center'>
                                         <h5 class='text-xl font-semibold text-gray-700'>QR کد برای {$user['username']}</h5>
-                                        <button type='button' class='text-gray-500 hover:text-gray-700' data-bs-dismiss='modal'>&times;</button>
+                                        <button type='button' class='text-gray-500 hover:text-gray-700' data-bs-dismiss='modal'>×</button>
                                     </div>
                                     <div class='modal-body'>
                                         <img src='{$user['qr_path']}' class='w-full'>
@@ -701,21 +704,26 @@ if (!isLoggedIn()) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $code = $_POST['server_code'];
     $group_id = $_POST['group_id'];
-    $secretKey = SECRET_KEY;
-    $serverData = decodeServerCode($code, $secretKey);
+    $serverData = decodeServerCode($code);
 
     if ($serverData) {
         global $db;
-        $db->prepare("INSERT INTO servers (group_id, ip, port, name, unique_code) VALUES (?, ?, ?, ?, ?)")->execute([
+        $db->prepare("INSERT INTO servers (group_id, ip, port, name, unique_code, secret_key) VALUES (?, ?, ?, ?, ?, ?)")->execute([
             $group_id,
             $serverData['ip'],
             $serverData['port'],
             $serverData['name'],
-            $code
+            $code,
+            $serverData['secret_key']
         ]);
         $success = "سرور با موفقیت به گروه اضافه شد!";
     } else {
         $error = "کد سرور نامعتبر است.";
+        $db->prepare("INSERT INTO logs (action, username, ip, created_at) VALUES (?, ?, ?, NOW())")->execute([
+            "Failed to add server: Invalid code $code",
+            $_SESSION['username'],
+            $_SERVER['REMOTE_ADDR']
+        ]);
     }
 }
 
@@ -1334,7 +1342,7 @@ function getServerLoad($serverId) {
 ?>
 EOL
 
-# includes/server-key.php
+    # includes/server-key.php
     cat > "$install_path/includes/server-key.php" <<'EOL'
 <?php
 function generateServerCode($ip, $port, $name, $secretKey) {
@@ -1342,17 +1350,21 @@ function generateServerCode($ip, $port, $name, $secretKey) {
     return hash_hmac('sha256', $data, $secretKey);
 }
 
-function decodeServerCode($code, $secretKey) {
+function decodeServerCode($code) {
     global $db;
-    $server = $db->prepare("SELECT ip, port, name FROM servers WHERE unique_code = ?");
+    $server = $db->prepare("SELECT ip, port, name, secret_key FROM servers WHERE unique_code = ?");
     $server->execute([$code]);
     $result = $server->fetch(PDO::FETCH_ASSOC);
     if ($result) {
-        return [
-            'ip' => $result['ip'],
-            'port' => $result['port'],
-            'name' => $result['name']
-        ];
+        $expected_code = hash_hmac('sha256', "{$result['ip']}|{$result['port']}|{$result['name']}", $result['secret_key']);
+        if ($expected_code === $code) {
+            return [
+                'ip' => $result['ip'],
+                'port' => $result['port'],
+                'name' => $result['name'],
+                'secret_key' => $result['secret_key']
+            ];
+        }
     }
     return false;
 }
@@ -1366,12 +1378,12 @@ define('DB_HOST', 'localhost');
 define('DB_NAME', '$DB_NAME');
 define('DB_USER', '$DB_USER');
 define('DB_PASS', '$DB_PASS');
-define('SECRET_KEY', '$(generate_random_string)');
+define('SECRET_KEY', '$SECRET_KEY');
 define('BASE_URL', '$base_url');
 ?>
 EOL
 
-    # assets/css/style.css
+# assets/css/style.css
     cat > "$install_path/assets/css/style.css" <<'EOL'
 @font-face {
     font-family: 'Yekan';
@@ -1491,8 +1503,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $bandwidth = $_POST['bandwidth'];
     $ping = $_POST['ping'];
     
-    $secretKey = SECRET_KEY;
-    $serverData = decodeServerCode($server_code, $secretKey);
+    $serverData = decodeServerCode($server_code);
     
     if ($serverData) {
         $db->prepare("INSERT INTO monitoring (server_id, active_users, bandwidth, ping, recorded_at) VALUES ((SELECT id FROM servers WHERE unique_code = ?), ?, ?, ?, NOW())")->execute([
@@ -1501,7 +1512,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bandwidth,
             $ping
         ]);
-        echo json_shape(['status' => 'success']);
+        echo json_encode(['status' => 'success']);
     } else {
         echo json_encode(['status' => 'error', 'message' => 'Invalid server code']);
     }
@@ -1556,6 +1567,7 @@ CREATE TABLE servers (
     port INT NOT NULL,
     name VARCHAR(50),
     unique_code VARCHAR(64) NOT NULL,
+    secret_key VARCHAR(64) NOT NULL,
     status ENUM('active', 'inactive') DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -1648,6 +1660,7 @@ EOL
     echo -e "${CYAN}V2Ray is running on port: $V2RAY_PORT${NC}"
     echo -e "${CYAN}Admin Username: $admin_user${NC}"
     echo -e "${CYAN}Admin Password: [Your chosen password]${NC}"
+    echo -e "${CYAN}Secret Key for Abroad Servers: $SECRET_KEY${NC}"
     log "Iran server installation completed"
 else
     # Install dependencies for abroad server
@@ -1682,9 +1695,8 @@ else
     # Generate encrypted server code
     progress_bar "Generating server code"
     SERVER_IP=$(get_server_ip)
-    SECRET_KEY=$(generate_random_string)
     SERVER_DATA=$(echo -n "$SERVER_IP|$V2RAY_PORT|$server_name")
-    UNIQUE_CODE=$(echo -n "$SERVER_DATA" | openssl dgst -sha256 -hmac "$SECRET_KEY" | head -c 64)
+    UNIQUE_CODE=$(echo -n "$SERVER_DATA" | openssl dgst -sha256 -hmac "$SECRET_KEY" | awk '{print $NF}')
     echo -e "${GREEN}Encrypted Server Code: $UNIQUE_CODE${NC}"
     log "Generated server code: $UNIQUE_CODE"
 
@@ -1845,6 +1857,13 @@ EOL
         log "Ping to Iran failed"
     fi
 
+    # Save abroad server details to Iran server
+    progress_bar "Registering server to Iran panel"
+    curl -X POST -d "server_code=$UNIQUE_CODE&ip=$SERVER_IP&port=$V2RAY_PORT&name=$server_name&secret_key=$SECRET_KEY" http://$domain${base_url:+/$base_url}/servers.php || {
+        echo -e "${YELLOW}Failed to register server to Iran panel. Manually add the code in the panel.${NC}"
+        log "Failed to register server to Iran panel"
+    }
+
     # Final message for abroad server
     echo -e "${GREEN}Abroad server setup completed!${NC}"
     echo -e "${GREEN}Server Name: $server_name${NC}"
@@ -1863,11 +1882,13 @@ if [[ "$server_location" == "iran" ]]; then
     echo -e "${CYAN}V2Ray is running on port: $V2RAY_PORT${NC}"
     echo -e "${CYAN}Admin Username: $admin_user${NC}"
     echo -e "${CYAN}Admin Password: [Your chosen password]${NC}"
+    echo -e "${CYAN}Secret Key for Abroad Servers: $SECRET_KEY${NC}"
 else
     echo -e "${CYAN}Server Name: $server_name${NC}"
     echo -e "${CYAN}V2Ray Port: $V2RAY_PORT${NC}"
     echo -e "${CYAN}SSH Port: $SSH_PORT${NC}"
     echo -e "${CYAN}Encrypted Server Code: $UNIQUE_CODE${NC}"
+    echo -e "${CYAN}Secret Key: $SECRET_KEY${NC}"
     echo -e "${CYAN}Use this code in the Iran panel to register the server.${NC}"
 fi
 log "Setup finished"
@@ -1888,11 +1909,13 @@ $(if [[ "$server_location" == "iran" ]]; then
     echo "Admin Username: $admin_user"
     echo "Database Name: $DB_NAME"
     echo "Database User: $DB_USER"
+    echo "Secret Key: $SECRET_KEY"
 else
     echo "Server Name: $server_name"
     echo "V2Ray Port: $V2RAY_PORT"
     echo "SSH Port: $SSH_PORT"
     echo "Encrypted Server Code: $UNIQUE_CODE"
+    echo "Secret Key: $SECRET_KEY"
 fi)
 ---------------------------------
 EOL
