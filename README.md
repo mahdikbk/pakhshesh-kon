@@ -76,7 +76,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/mahdikbk/pakhshesh-kon/main/in
 ### خروجی نمونه
 ```bash
 Setup finished successfully!
-Access your panel at: https://iran.doregi.ir/kbkpanel/
+Access your panel at: https://iran.xxx.ir/kbkpanel/
 V2Ray is running on port: 10062
 Admin Username: admin
 Admin Password: [Your chosen password]
@@ -89,7 +89,7 @@ Thank you for using Pakhshesh Kon by MahdiKBK!
 ## راهنمای استفاده
 
 ### ورود به پنل
-1. به آدرس پنل (مثل `https://iran.doregi.ir/kbkpanel/`) برید.
+1. به آدرس پنل (مثل `https://iran.xxx.ir/kbkpanel/`) برید.
 2. با نام کاربری و رمز ادمین (مثل `admin`) وارد بشید.
 3. داشبورد با نمودارهای واقعی ترافیک، پینگ، و کاربران فعال رو ببینید.
 
