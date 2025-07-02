@@ -4,7 +4,7 @@
 
 **پخشش کن!** یک پنل مدیریت VPN پیشرفته و کاربرپسند است که با استفاده از **V2Ray** طراحی شده تا اتصال امن و سریع به سرورهای ایران و خارجی رو فراهم کنه. این پروژه با رابط کاربری شیک، فونت زیبای **یکان**، و دیزاین مدرن با **Tailwind CSS**، تجربه‌ای حرفه‌ای برای مدیریت سرورها و کاربران ارائه می‌ده. از مانیتورینگ real-time گرفته تا اعلان‌های تلگرام و نمودارهای واقعی، همه‌چیز برای یه سیستم حرفه‌ای آماده‌ست!
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-GNU-yellow.svg)](https://opensource.org/licenses/GNU)
 [![Version](https://img.shields.io/badge/Version-1.0.0-blue.svg)](https://github.com/mahdikbk/pakhshesh-kon/releases)
 [![GitHub Issues](https://img.shields.io/github/issues/mahdikbk/pakhshesh-kon)](https://github.com/mahdikbk/pakhshesh-kon/issues)
 
