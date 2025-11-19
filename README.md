@@ -470,7 +470,6 @@ tail -f /var/log/v2ray/error.log
 
 - 🐛 [گزارش باگ](https://github.com/mahdikbk/pakhshesh-kon/issues)
 - 💬 [سوالات](https://github.com/mahdikbk/pakhshesh-kon/discussions)
-- 📧 ایمیل: [mahdi@example.com](mailto:mahdi@example.com)
 
 ---
 
