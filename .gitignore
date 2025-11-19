@@ -1,0 +1,45 @@
+# Dependencies
+/vendor/
+/node_modules/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+/logs/
+*.log
+
+# Cache
+/cache/
+*.cache
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup
+/backups/
+*.sql
+*.sql.gz
+*.tar.gz
+
+# QR Codes (optional - can be committed)
+/public/qrcodes/*.png
+
+# Test
+/coverage/
+.phpunit.result.cache
+
+# Temporary
+/tmp/
+/temp/
+
